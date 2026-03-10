@@ -1,0 +1,248 @@
+﻿@host = {{host}}
+@apiVersion = {{apiVersion}}
+
+### ===== HEALTH CHECK =====
+
+GET {{host}}/health
+
+### ===== CUSTOMERS =====
+
+### Create a customer (happy path)
+# @name createCustomer
+POST {{host}}/api/Customers?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "firstName": "John",
+  "lastName": "Doe",
+  "email": "john.doe@example.com",
+  "phoneNumber": "+15551234567",
+  "shippingAddress": {
+    "street": "123 Main St",
+    "city": "Seattle",
+    "state": "WA",
+    "postalCode": "98101",
+    "country": "US"
+  }
+}
+
+### Get customer by ID
+GET {{host}}/api/Customers/{{createCustomer.response.body.id}}?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Create customer - duplicate email (409 Conflict)
+POST {{host}}/api/Customers?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "email": "john.doe@example.com",
+  "shippingAddress": {
+    "street": "456 Oak Ave",
+    "city": "Portland",
+    "state": "OR",
+    "postalCode": "97201",
+    "country": "US"
+  }
+}
+
+### Create customer - invalid email (400 Bad Request)
+POST {{host}}/api/Customers?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "firstName": "Bad",
+  "lastName": "Email",
+  "email": "not-an-email",
+  "shippingAddress": {
+    "street": "789 Pine St",
+    "city": "Anytown",
+    "state": "WA",
+    "postalCode": "98052",
+    "country": "US"
+  }
+}
+
+### ===== PRODUCTS =====
+
+### Create a product (happy path)
+# @name createProduct
+POST {{host}}/api/Products?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "productName": "Widget Pro",
+  "sku": "WDGPRO001",
+  "unitPrice": 29.99
+}
+
+### Get product by ID
+GET {{host}}/api/Products/{{createProduct.response.body.id}}?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Create product - duplicate SKU (409 Conflict)
+POST {{host}}/api/Products?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "productName": "Another Widget",
+  "sku": "WDGPRO001",
+  "unitPrice": 19.99
+}
+
+### Create product - zero price (400 Bad Request)
+POST {{host}}/api/Products?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "productName": "Free Item",
+  "sku": "FREE001",
+  "unitPrice": 0
+}
+
+### Add stock to product
+# @name addStock
+POST {{host}}/api/Products/{{createProduct.response.body.id}}/stock-additions?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "quantity": 100
+}
+
+### ===== ORDERS =====
+
+### Create a draft order (happy path)
+# @name createOrder
+POST {{host}}/api/Orders?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "customerId": "{{createCustomer.response.body.id}}",
+  "lineItems": [
+    {
+      "productId": "{{createProduct.response.body.id}}",
+      "quantity": 3
+    }
+  ]
+}
+
+### Get order by ID
+GET {{host}}/api/Orders/{{createOrder.response.body.id}}?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Get order - nonexistent ID (404 Not Found)
+GET {{host}}/api/Orders/00000000-0000-0000-0000-000000000000?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Add line item to draft order (need a second product first)
+# @name createProduct2
+POST {{host}}/api/Products?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "productName": "Gadget",
+  "sku": "GDG001",
+  "unitPrice": 49.99
+}
+
+###
+POST {{host}}/api/Products/{{createProduct2.response.body.id}}/stock-additions?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "quantity": 50
+}
+
+### Add line item
+POST {{host}}/api/Orders/{{createOrder.response.body.id}}/line-items?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "productId": "{{createProduct2.response.body.id}}",
+  "quantity": 2
+}
+
+### Remove line item (use a line item ID from the order response)
+# DELETE {{host}}/api/Orders/{{createOrder.response.body.id}}/line-items/{lineItemId}?api-version={{apiVersion}}
+# X-Test-Actor: {{adminActor}}
+
+### Submit order
+# @name submitOrder
+POST {{host}}/api/Orders/{{createOrder.response.body.id}}/submission?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### List orders by customer
+GET {{host}}/api/Customers/{{createCustomer.response.body.id}}/orders?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Approve order
+POST {{host}}/api/Orders/{{createOrder.response.body.id}}/approval?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Ship order
+POST {{host}}/api/Orders/{{createOrder.response.body.id}}/shipment?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Deliver order
+POST {{host}}/api/Orders/{{createOrder.response.body.id}}/delivery?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### ===== CANCEL FLOW (separate order) =====
+
+### Create another order to test cancellation
+# @name cancelOrder
+POST {{host}}/api/Orders?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "customerId": "{{createCustomer.response.body.id}}",
+  "lineItems": [
+    {
+      "productId": "{{createProduct.response.body.id}}",
+      "quantity": 5
+    }
+  ]
+}
+
+### Cancel draft order
+POST {{host}}/api/Orders/{{cancelOrder.response.body.id}}/cancellation?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### ===== AUTHORIZATION ERROR =====
+
+### Create customer with read-only actor (403 Forbidden)
+POST {{host}}/api/Customers?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{readOnlyActor}}
+
+{
+  "firstName": "Unauthorized",
+  "lastName": "User",
+  "email": "unauth@example.com",
+  "shippingAddress": {
+    "street": "123 No Access",
+    "city": "Denied",
+    "state": "WA",
+    "postalCode": "98000",
+    "country": "US"
+  }
+}
+
+### ===== OVERDUE ORDERS =====
+
+### List overdue orders
+GET {{host}}/api/Orders/overdue?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}

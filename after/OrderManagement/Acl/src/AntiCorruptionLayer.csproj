@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Trellis.EntityFrameworkCore" />
+    <PackageReference Include="Trellis.EntityFrameworkCore.Generator" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Application\src\Application.csproj" />
+  </ItemGroup>
+</Project>

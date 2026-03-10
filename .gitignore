@@ -1,0 +1,25 @@
+# Build results
+**/bin/
+**/obj/
+
+# IDE
+.vs/
+*.user
+*.suo
+*.sln.docstates
+
+# Databases
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+Thumbs.db
+.DS_Store
+
+# NuGet
+*.nupkg
+packages/
+
+# Misc
+*.log
