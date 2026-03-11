@@ -90,8 +90,8 @@ Success track on top (green/blue), failure track on bottom (red). Each operation
 
 ## Style Guidelines
 
-- **Color palette:** Navy (#1a1a2e), Electric Blue (#0099ff), White (#ffffff), with accents in Green (#00cc66), Orange (#ff9933), Purple (#9966ff), Red (#ff4444)
-- **Style:** Clean, modern, slightly technical — think developer documentation meets infographic
-- **Fonts:** Sans-serif, high contrast for readability at small sizes
-- **Format:** PNG with transparent or dark backgrounds (works on both light/dark GitHub themes)
+- **Color palette (from Trellis brand):** Navy (#1a2744), Dark Green (#1b5e3a), Teal (#4db8a4), Light Green (#8cc63f), White (#ffffff)
+- **Style:** Clean, modern, slightly technical — think developer documentation meets infographic. Use the trellis lattice + vine motif where appropriate.
+- **Fonts:** Sans-serif (condensed for headings, matching the "THE TRELLIS" logo style), high contrast for readability at small sizes
+- **Format:** PNG with white or transparent backgrounds (works on both light/dark GitHub themes)
 - **Resolution:** 2x for retina displays (actual dimensions in the table above are display size)

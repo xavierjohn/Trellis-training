@@ -94,13 +94,7 @@ Every run is scored against **57 criteria** across 5 levels:
 
 | AI Model | Trellis | Score | Verdict |
 |----------|---------|-------|---------|
-| Claude Opus 4.6 | alpha.98 | 55/58 (95%) | **PASS** |
-| Claude Opus 4.6 Run 2 | alpha.99 | 55/58 (95%) | **PASS** |
-| Claude Opus 4.6 Run 4 | alpha.104 | 53/57 (93%) | **PASS** |
-| Claude Sonnet 4.6 | alpha.98 | 55/58 (95%) | **PASS** |
-| GPT-5.2 Codex Max | alpha.98 | 40/58 (69%) | **FAIL** |
-| Gemini 2.5 Pro | alpha.98 | 36/58 (62%) | **FAIL** |
-| Claude Sonnet 4 | alpha.98 | 26/58 (45%) | **FAIL** |
+| Claude Opus 4.6 | alpha.104 | 53/57 (93%) | **PASS** |
 
 Full results: **[results/evaluation-results.md](results/evaluation-results.md)**
 
