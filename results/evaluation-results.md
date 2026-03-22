@@ -353,6 +353,44 @@ Sonnet 4.6 is the first model to achieve 57/57 but took ~10 hours due to build e
 
 ---
 
+---
+
+## Level 6: Feature Addition — Order Returns (Step 8)
+
+Each model extended its own Part 1 implementation with the Order Returns feature. This tests incremental modification of an existing Trellis codebase.
+
+### Summary
+
+| Model | Part 1 Tests | Part 2 Tests | New Tests | Regressions | Runtime | Verdict |
+|-------|:------------:|:------------:|:---------:|:-----------:|--------:|---------|
+| GPT-5.4 | 34 | **42** | +8 | 0 | 7.5 min | **PASS** |
+| Claude Opus 4.6 | 41 | **49** | +8 | 0 | 13 min | **PASS** |
+| Claude Sonnet 4.6 | 57 | **70** | +13 | 0 | 23 min | **PASS** |
+
+### What Each Model Added
+
+All three models correctly implemented:
+- ✅ `Returned` added to OrderStatus enum + state machine transition `Delivered → Returned`
+- ✅ `ReturnReason` value object (10–500 char validation via TryCreate)
+- ✅ `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTime>` on Order
+- ✅ 30-day return window validation (testable with injectable date)
+- ✅ Stock released on return (same pattern as cancel)
+- ✅ `ReturnOrderCommand` with `orders:return` permission via IAuthorize
+- ✅ `POST /api/orders/{id}/return` endpoint with correct status codes
+- ✅ `OrderReturnedEvent` domain event
+- ✅ Domain + Application + API tests for return scenarios
+- ✅ Zero regressions — all pre-existing tests still pass
+
+### Key Observations
+
+- **All three achieved zero regressions** — the Trellis 4-layer architecture and state machine pattern enabled safe incremental modification.
+- **GPT-5.4 was fastest** (7.5 min) — confident, surgical changes with minimal retry.
+- **Sonnet added the most tests** (+13 vs +8) including edge cases and also fixed bugs in its own repository implementations discovered during the feature addition.
+- **Stock release reuse** — all three recognized that return stock release is the same pattern as cancel and reused the existing logic.
+- **State machine extension** — all three correctly added the new transition without breaking existing transitions.
+
+---
+
 ## Historical Comparison
 
 Previous scores on alpha.104/alpha.106 vs. current alpha.124:
