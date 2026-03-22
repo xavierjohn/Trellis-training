@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Trellis.EntityFrameworkCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Application\src\Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="OrderManagement.Domain" />
+    <Using Include="OrderManagement.Domain.Specifications" />
+    <Using Include="OrderManagement.Application.Abstractions" />
+    <Using Include="Trellis.Primitives" />
+  </ItemGroup>
+</Project>

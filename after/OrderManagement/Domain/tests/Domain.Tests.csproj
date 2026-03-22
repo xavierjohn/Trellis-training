@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <NoWarn>TRLS001;TRLS003;TRLS007</NoWarn>
-  </PropertyGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\src\Domain.csproj" />
-  </ItemGroup>
-</Project>

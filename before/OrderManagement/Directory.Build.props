@@ -1,7 +1,7 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Sdk Name="DotNet.ReproducibleBuilds.Isolated" Version="1.1.1" />
   <PropertyGroup Label="General">
-    <Authors>Trellis Training</Authors>
+    <Authors>Your Name</Authors>
     <Company>$(Authors)</Company>
     <Copyright>Copyright © $(Company) 2022. All rights reserved.</Copyright>
     <NeutralLanguage>en</NeutralLanguage>
