@@ -173,11 +173,15 @@ Cancel Order has an ownership check in addition to the `orders:cancel` permissio
 
 ### 5.5 Actor Provider
 
-In the API layer, the current actor is determined from the request context:
-- Actor identity from the `sub` (or `oid`) claim
-- Actor permissions from `role` claims
+The template already registers actor providers conditionally in `Api/src/DependencyInjection.cs`:
+- **Development:** `AddDevelopmentActorProvider()` reads the `X-Test-Actor` HTTP header (from `Trellis.Asp.Authorization`)
+- **Production:** `AddEntraActorProvider()` reads JWT claims from Azure Entra ID tokens
 
-For testing and evaluation, the API layer reads a custom `X-Test-Actor` header containing a JSON payload: `{"id": "actor-1", "permissions": ["orders:create", "orders:read"]}`. If the header is absent, use a default Admin actor so existing tests don't break.
+**Do NOT create a custom `HttpActorProvider` or `IActorProvider` implementation.** The framework provides these.
+
+For testing and evaluation, the `X-Test-Actor` header contains a JSON payload: `{"Id": "actor-1", "Permissions": ["orders:create", "orders:read"]}`. If the header is absent, `DevelopmentActorProvider` returns a default actor (configurable via `DevelopmentActorOptions`).
+
+For API integration tests, use `factory.CreateClientWithActor("user-1", "perm1", "perm2")` from `Trellis.Testing`.
 
 ## 6. Operations (Use Cases)
 
