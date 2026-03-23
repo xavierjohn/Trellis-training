@@ -94,9 +94,9 @@ Every run is scored against **58 criteria** across 5 levels:
 
 | AI Model | Trellis | Score | Verdict |
 |----------|---------|-------|---------|
-| Claude Sonnet 4.6 | alpha.124 | 57/58 (98%) | **PASS** |
-| Claude Opus 4.6 | alpha.124 | 57/58 (98%) | **PASS** |
-| GPT-5.4 | alpha.124 | 56/58 (97%) | **PASS** |
+| GPT-5.4 | alpha.127 | 58/58 (100%) | **PASS** |
+| Claude Sonnet 4.6 | alpha.127 | 58/58 (100%) | **PASS** |
+| Claude Opus 4.6 | alpha.127 | 57/58 (98%) | **PASS** |
 
 Full results: **[results/evaluation-results.md](results/evaluation-results.md)**
 

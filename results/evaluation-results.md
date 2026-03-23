@@ -2,11 +2,11 @@
 
 Tracks how well different AI models implement the Order Management spec using Trellis conventions.
 
-**Evaluation spec:** Order Management (see [`specs/order-management.md`](../specs/order-management.md))
+**Evaluation spec:** Order Management (see [`specs/order-management-sqlite.md`](../specs/order-management-sqlite.md))
 **Scoring framework:** 58 criteria across 5 levels (see [`docs/training-lab.md`](../docs/training-lab.md))
-**Goal:** Total score of 52+/57
-**Trellis version:** 3.0.0-alpha.124
-**Template version:** Trellis.AspTemplate 1.0.3-alpha
+**Goal:** Total score of 52+/58
+**Trellis version:** 3.0.0-alpha.127
+**Template version:** Trellis.AspTemplate 1.0.6-alpha (NuGet.org)
 
 ---
 
@@ -14,9 +14,9 @@ Tracks how well different AI models implement the Order Management spec using Tr
 
 | Date | AI Model | Build | Tests | L1 (/18) | L2 (/13) | L3 (/14) | L4 (/9) | L5 (/4) | Total (/58) | Verdict |
 |------|----------|-------|-------|----------|----------|----------|---------|---------|-------------|---------|
-| 2026-03-22 | GPT-5.4 (Copilot) | 0 errors | 34/34 | 17/18 | 13/13 | 14/14 | 9/9 | 3/4 | **56/58** | **PASS** |
-| 2026-03-22 | Claude Sonnet 4.6 (Copilot) | 0 errors | 57/57 | 18/18 | 13/13 | 13/14 | 9/9 | 4/4 | **57/58** | **PASS** |
-| 2026-03-22 | Claude Opus 4.6 (Copilot) | 0 errors | 41/41 | 17/18 | 13/13 | 14/14 | 9/9 | 4/4 | **57/58** | **PASS** |
+| 2026-03-23 | GPT-5.4 (Copilot) | 0 errors | 33/33 | 18/18 | 13/13 | 14/14 | 9/9 | 4/4 | **58/58** | **PASS** |
+| 2026-03-23 | Claude Sonnet 4.6 (Copilot) | 0 errors | 94/94 | 18/18 | 13/13 | 14/14 | 9/9 | 4/4 | **58/58** | **PASS** |
+| 2026-03-23 | Claude Opus 4.6 (Copilot) | 0 errors | 41/41 | 18/18 | 13/13 | 13/14 | 9/9 | 4/4 | **57/58** | **PASS** |
 
 ---
 

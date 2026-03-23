@@ -1,4 +1,4 @@
-﻿### Health Check
+### Health Check
 // 200 OK
 GET {{HostAddress}}/health
 Accept: application/json
@@ -95,7 +95,7 @@ X-Test-Actor: {{adminActor}}
 
 {
   "productName": "Widget Pro",
-  "sku": "WGT-PRO-001",
+  "sku": "WGTPRO001",
   "unitPriceAmount": 29.99,
   "unitPriceCurrency": "USD"
 }
@@ -109,7 +109,7 @@ X-Test-Actor: {{adminActor}}
 
 {
   "productName": "Widget Pro v2",
-  "sku": "WGT-PRO-001",
+  "sku": "WGTPRO001",
   "unitPriceAmount": 39.99,
   "unitPriceCurrency": "USD"
 }
