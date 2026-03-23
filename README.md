@@ -6,7 +6,7 @@
 
 **Build enterprise services with AI — and measure consistency.**
 
-Give an AI model a business spec, a framework (Trellis), and a template. Let it implement the entire service in one shot. Then evaluate the output against 57 criteria across 5 levels of quality.
+Give an AI model a business spec, a framework (Trellis), and a template. Let it implement the entire service in one shot. Then evaluate the output against 58 criteria across 5 levels of quality.
 
 This isn't a tutorial — it's a **training lab** that doubles as an **AI consistency benchmark**.
 
@@ -74,7 +74,7 @@ Browse the full source:
 
 ## Evaluation
 
-Every run is scored against **57 criteria** across 5 levels:
+Every run is scored against **58 criteria** across 5 levels:
 
 <p align="center">
   <img src="docs/images/evaluation-radar.png" alt="Evaluation Radar — L1 Structural, L2 Behavioral, L3 Architecture, L4 Tests, L5 Feedback" width="500"/>
@@ -88,15 +88,15 @@ Every run is scored against **57 criteria** across 5 levels:
 | **L4: Tests** | Are domain, integration, and auth tests comprehensive? | 9 |
 | **L5: Feedback** | Did the AI produce useful framework feedback? | 4 |
 
-**Passing score: 52+/57**
+**Passing score: 52+/58**
 
 ### Results So Far
 
 | AI Model | Trellis | Score | Verdict |
 |----------|---------|-------|---------|
-| Claude Sonnet 4.6 | alpha.124 | 57/57 (100%) | **PASS** |
-| Claude Opus 4.6 | alpha.124 | 56/57 (98%) | **PASS** |
-| GPT-5.4 | alpha.124 | 55/57 (96%) | **PASS** |
+| Claude Sonnet 4.6 | alpha.124 | 57/58 (98%) | **PASS** |
+| Claude Opus 4.6 | alpha.124 | 57/58 (98%) | **PASS** |
+| GPT-5.4 | alpha.124 | 56/58 (97%) | **PASS** |
 
 Full results: **[results/evaluation-results.md](results/evaluation-results.md)**
 

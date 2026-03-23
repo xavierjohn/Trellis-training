@@ -384,6 +384,7 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **DTOs in Api layer** | Request/Response types in versioned Models/ folder (e.g., `Api/src/{version}/Models/`), not domain types | 10 = all correct, <7 = needs example |
 | **EF Core entity configurations** | IEntityTypeConfiguration classes in Acl | 10 = all correct, <7 = needs guidance |
 | **EnsureCreated on startup** | Database created via `EnsureCreated()` in development mode, no EF Core migrations | 10 = all correct, <7 = needs instruction |
+| **api.http updated** | Template api.http replaced with requests covering all 14 endpoints, correct api-version, X-Test-Actor headers, happy path + error examples | 10 = all endpoints, <7 = still has scaffold defaults |
 
 ### Level 4: Test Consistency (Scored)
 
