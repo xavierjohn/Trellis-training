@@ -94,9 +94,9 @@ Every run is scored against **57 criteria** across 5 levels:
 
 | AI Model | Trellis | Score | Verdict |
 |----------|---------|-------|---------|
-| Claude Opus 4.6 | alpha.104 | 53/57 (93%) | **PASS** |
-| GPT-5.4 | alpha.106 | 45/57 (79%) | **FAIL** |
-| Claude Sonnet 4.6 | alpha.106 | 55/57 (96%) | **PASS** |
+| Claude Sonnet 4.6 | alpha.124 | 57/57 (100%) | **PASS** |
+| Claude Opus 4.6 | alpha.124 | 56/57 (98%) | **PASS** |
+| GPT-5.4 | alpha.124 | 55/57 (96%) | **PASS** |
 
 Full results: **[results/evaluation-results.md](results/evaluation-results.md)**
 
@@ -165,14 +165,18 @@ trellis-training/
 │       ├── scalar-api-docs.png        # Scalar API screenshot
 │       └── rop-pipeline.png           # ROP chain visualization
 ├── specs/
-│   └── order-management.md            # Business spec (paste into Copilot)
+│   ├── order-management-sqlite.md    # Business spec — SQLite/EF Core
+│   └── order-management-cosmosdb.md  # Business spec — CosmosDB variant
 ├── results/
 │   ├── evaluation-results.md          # Detailed scorecards across runs
 │   └── ai-mistakes-log.md            # Common mistake patterns
 ├── before/
 │   └── OrderManagement/              # Template scaffold (what you start with)
 └── after/
-    └── OrderManagement/              # Reference implementation (what AI builds)
+    ├── part1/
+    │   └── OrderManagement/          # Reference implementation (main service)
+    └── part2/
+        └── OrderManagement/          # Reference implementation (with Returns feature)
 ```
 
 ## License
