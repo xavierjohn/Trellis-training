@@ -6,7 +6,7 @@
 
 **Build enterprise services with AI — and measure consistency.**
 
-Give an AI model a business spec, a framework (Trellis), and a template. Let it implement the entire service in one shot. Then evaluate the output against 58 criteria across 5 levels of quality.
+Give an AI model a business spec, a framework (Trellis), and a template. Let it implement the entire service in one shot. Then evaluate the output against 59 criteria across 5 levels of quality.
 
 This isn't a tutorial — it's a **training lab** that doubles as an **AI consistency benchmark**.
 
@@ -74,7 +74,7 @@ Browse the full source:
 
 ## Evaluation
 
-Every run is scored against **58 criteria** across 5 levels:
+Every run is scored against **59 criteria** across 5 levels:
 
 <p align="center">
   <img src="docs/images/evaluation-radar.png" alt="Evaluation Radar — L1 Structural, L2 Behavioral, L3 Architecture, L4 Tests, L5 Feedback" width="500"/>
@@ -84,11 +84,11 @@ Every run is scored against **58 criteria** across 5 levels:
 |-------|-----------------|----------|
 | **L1: Structural** | Are the right types, patterns, and building blocks present? | 18 |
 | **L2: Behavioral** | Does the business logic work correctly? | 13 |
-| **L3: Architecture** | Is the API, DI, and infrastructure correct? | 13 |
+| **L3: Architecture** | Is the API, DI, and infrastructure correct? | 15 |
 | **L4: Tests** | Are domain, integration, and auth tests comprehensive? | 9 |
 | **L5: Feedback** | Did the AI produce useful framework feedback? | 4 |
 
-**Passing score: 52+/58**
+**Passing score: 53+/59**
 
 ### Results So Far
 

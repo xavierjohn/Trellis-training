@@ -385,6 +385,7 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **EF Core entity configurations** | IEntityTypeConfiguration classes in Acl | 10 = all correct, <7 = needs guidance |
 | **EnsureCreated on startup** | Database created via `EnsureCreated()` in development mode, no EF Core migrations | 10 = all correct, <7 = needs instruction |
 | **api.http updated** | Template api.http replaced with requests covering all 14 endpoints, correct api-version, X-Test-Actor headers, happy path + error examples | 10 = all endpoints, <7 = still has scaffold defaults |
+| **api.http playback passes** | All api.http requests execute successfully against the running service: happy-path requests return expected status codes (201, 200), error-path requests return expected error codes (400, 409, 403, 404). No requests fail due to invalid test data (e.g., SKU format mismatches, wrong field names). | 10 = all pass, <7 = some requests fail |
 
 ### Level 4: Test Consistency (Scored)
 

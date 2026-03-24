@@ -17,7 +17,7 @@ The system uses role-based access control. Sales representatives create customer
 | **Order** | A request by a customer to purchase one or more products. Has a unique ID, belongs to one customer, contains one or more line items, and has a status. Records which actor created it. |
 | **Line Item** | A single entry in an order specifying a product, quantity, and unit price at time of order. |
 | **Order Status** | The current state of an order: Draft, Submitted, Approved, Shipped, Delivered, Cancelled. |
-| **SKU** | Stock Keeping Unit — a unique alphanumeric identifier for a product, 3–20 characters, uppercase letters and digits only. |
+| **SKU** | Stock Keeping Unit — a unique identifier for a product, 3–20 characters, uppercase letters, digits, and hyphens only (no leading/trailing hyphens). Examples: `WGT-PRO-001`, `ABC123`, `X1`. |
 | **Shipping Address** | A value consisting of street, city, state, postal code, and country. All fields required. |
 | **Order Total** | The sum of (unit price × quantity) for all line items in the order. |
 | **Inventory** | The current available stock quantity of a product. Cannot go below zero. |
@@ -48,7 +48,7 @@ The system uses role-based access control. Sales representatives create customer
 
 **Properties:**
 - ProductName — required, 1–200 characters
-- SKU — required, 3–20 characters, uppercase alphanumeric only, unique across all products
+- SKU — required, 3–20 characters, uppercase letters, digits, and hyphens only, no leading/trailing hyphens (regex: `^[A-Z0-9][A-Z0-9\-]{1,18}[A-Z0-9]$`), unique across all products
 - UnitPrice — must be greater than zero, USD currency
 - StockQuantity — non-negative integer
 
@@ -325,6 +325,132 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 - All requests must include authentication context via the `X-Test-Actor` header (see Section 5.5). Requests without authentication context use the default Admin actor.
 - POST /customers and POST /orders return 201 Created with a Location header pointing to the created resource.
 - A `/health` endpoint must be available for health checks.
+
+### 7.1 Response Schemas
+
+All successful responses use the following JSON shapes. Field names use **camelCase**. Use these exact field names in DTOs — this ensures api.http files and integration tests are portable across implementations.
+
+**Customer Response** (used by Create Customer 201, and embedded in order responses):
+```json
+{
+  "id": "guid",
+  "firstName": "string",
+  "lastName": "string",
+  "email": "string",
+  "phoneNumber": "string | null",
+  "shippingAddress": {
+    "street": "string",
+    "city": "string",
+    "state": "string",
+    "postalCode": "string",
+    "country": "string"
+  }
+}
+```
+
+**Product Response** (used by Create Product 201, Add Stock 200):
+```json
+{
+  "id": "guid",
+  "productName": "Widget Pro",
+  "sku": "WGT-PRO-001",
+  "unitPrice": { "amount": 29.99, "currency": "USD" },
+  "stockQuantity": 0
+}
+```
+
+**Order Response** (used by Create Draft Order 201, Get Order 200, and all state transition 200 responses):
+```json
+{
+  "id": "guid",
+  "customerId": "guid",
+  "createdByActorId": "string",
+  "status": "Draft | Submitted | Approved | Shipped | Delivered | Cancelled",
+  "total": { "amount": 49.97, "currency": "USD" },
+  "createdAt": "2026-01-15T12:00:00Z",
+  "submittedAt": "2026-01-15T12:30:00Z | null",
+  "shippedAt": "2026-01-16T09:00:00Z | null",
+  "lineItems": [
+    {
+      "id": "guid",
+      "productId": "guid",
+      "productName": "string",
+      "quantity": 2,
+      "unitPrice": { "amount": 19.99, "currency": "USD" }
+    }
+  ]
+}
+```
+
+**List Responses** (List Orders by Customer, List Overdue Orders):
+Returns a JSON array of Order Response objects: `[ { ... }, { ... } ]`
+
+**Error Response** (all error codes follow RFC 9457 Problem Details):
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+  "title": "One or more validation errors occurred.",
+  "status": 400,
+  "detail": "Specific error message",
+  "errors": { "fieldName": ["Error detail"] },
+  "traceId": "00-..."
+}
+```
+
+### 7.2 Request Schemas
+
+**Create Customer:**
+```json
+{
+  "firstName": "string",
+  "lastName": "string",
+  "email": "string",
+  "phoneNumber": "string | null",
+  "shippingAddress": {
+    "street": "string",
+    "city": "string",
+    "state": "string",
+    "postalCode": "string",
+    "country": "string"
+  }
+}
+```
+
+**Create Product:**
+```json
+{
+  "productName": "Widget Pro",
+  "sku": "WGT-PRO-001",
+  "unitPrice": { "amount": 29.99, "currency": "USD" }
+}
+```
+
+**Add Stock:**
+```json
+{ "quantity": 10 }
+```
+
+**Create Draft Order:**
+```json
+{
+  "customerId": "guid",
+  "lineItems": [
+    { "productId": "guid", "quantity": 2 }
+  ]
+}
+```
+
+**Add Line Item:**
+```json
+{ "productId": "guid", "quantity": 1 }
+```
+
+**Return Order** (Part 2 feature):
+```json
+{ "reason": "string (10-500 characters)" }
+```
+
+Submit, Approve, Ship, Deliver, and Cancel require no request body.
 
 ## 8. Persistence
 
