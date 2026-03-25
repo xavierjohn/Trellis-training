@@ -307,7 +307,9 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 | Method | Path | Operation | Permission | Success | Error Codes |
 |--------|------|-----------|-----------|---------|-------------|
 | POST | /api/customers | Create Customer | `customers:create` | 201 Created | 400, 403, 409 |
+| GET | /api/customers/{id} | Get Customer | `customers:read` | 200 OK | 403, 404 |
 | POST | /api/products | Create Product | `products:create` | 201 Created | 400, 403, 409 |
+| GET | /api/products/{id} | Get Product | `products:read` | 200 OK | 403, 404 |
 | POST | /api/products/{id}/stock-additions | Add Stock | `products:manage-stock` | 200 OK | 400, 403, 404 |
 | POST | /api/orders | Create Draft Order | `orders:create` | 201 Created | 400, 403, 404 |
 | POST | /api/orders/{id}/line-items | Add Line Item | `orders:create` | 200 OK | 400, 403, 404 |
@@ -323,7 +325,7 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 
 - All requests must include `?api-version=2026-11-12` query parameter. Requests without a version return 400 Bad Request.
 - All requests must include authentication context via the `X-Test-Actor` header (see Section 5.5). Requests without authentication context use the default Admin actor.
-- POST /customers and POST /orders return 201 Created with a Location header pointing to the created resource.
+- POST /customers, POST /products, and POST /orders return 201 Created with a Location header pointing to the created resource.
 - A `/health` endpoint must be available for health checks.
 
 ### 7.1 Response Schemas
