@@ -1,14 +1,23 @@
 ﻿namespace Application.Tests;
 
-using Application.Tests.WeatherForecast;
-using OrderManagement.Application.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using OrderManagement.Application;
+using OrderManagement.Application.Todos;
+using OrderManagement.Domain;
+using Trellis.Authorization;
+using Trellis.Mediator;
+using Trellis.Testing.Fakes;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddMockAntiCorruptionLayer(this IServiceCollection services)
+    public static IServiceCollection AddMockDependencies(this IServiceCollection services)
     {
-        services.AddSingleton<IWeatherForecastService, MockWeatherForecastService>();
+        var actorProvider = new TestActorProvider("test-user", Permissions.TodosCreate, Permissions.TodosRead, Permissions.TodosUpdate, Permissions.TodosComplete, Permissions.TodosDelete);
+        services.AddSingleton<TestActorProvider>(actorProvider);
+        services.AddSingleton<IActorProvider>(actorProvider);
+        services.AddScoped<FakeRepository<TodoItem, TodoId>>();
+        services.AddScoped<ITodoRepository, FakeRepositoryAdapter>();
+        services.AddResourceAuthorization(typeof(CompleteTodoCommand).Assembly, typeof(FakeCompleteTodoResourceLoader).Assembly);
         return services;
     }
 }

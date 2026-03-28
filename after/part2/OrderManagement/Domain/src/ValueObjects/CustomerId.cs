@@ -1,3 +1,6 @@
 namespace OrderManagement.Domain;
 
-public partial class CustomerId : RequiredGuid<CustomerId> { }
+/// <summary>Unique identifier for a customer.</summary>
+public partial class CustomerId : RequiredGuid<CustomerId>
+{
+}

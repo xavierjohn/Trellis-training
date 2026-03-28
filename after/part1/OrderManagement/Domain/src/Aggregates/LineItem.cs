@@ -2,52 +2,33 @@ namespace OrderManagement.Domain;
 
 using Trellis.Primitives;
 
+/// <summary>
+/// A single line item in an order, capturing product details at the time the order was created.
+/// Owned by the Order aggregate.
+/// </summary>
 public class LineItem : Entity<LineItemId>
 {
-    public ProductId ProductId { get; private set; } = default!;
-    public string ProductName { get; private set; } = default!;
-    public int Quantity { get; private set; }
-    public Money UnitPrice { get; private set; } = default!;
+    /// <summary>Reference to the product.</summary>
+    public ProductId ProductId { get; private set; } = null!;
 
-    public Money Total
-    {
-        get
-        {
-            if (UnitPrice.Multiply(Quantity).TryGetValue(out var total))
-                return total;
-            return UnitPrice;
-        }
-    }
+    /// <summary>Snapshot of the product name at the time the line item was added.</summary>
+    public ProductName ProductName { get; private set; } = null!;
 
-    internal static Result<LineItem> TryCreate(
-        ProductId productId,
-        string productName,
-        int quantity,
-        Money unitPrice)
-    {
-        if (string.IsNullOrWhiteSpace(productName))
-            return Error.Validation("Product name is required", "productName");
-        if (quantity < 1 || quantity > 999)
-            return Error.Validation("Quantity must be between 1 and 999", "quantity");
+    /// <summary>Quantity ordered.</summary>
+    public LineItemQuantity Quantity { get; private set; } = null!;
 
-        return new LineItem(LineItemId.NewUniqueV4(), productId, productName, quantity, unitPrice);
-    }
+    /// <summary>Snapshot of the unit price at the time the line item was added.</summary>
+    public Money UnitPrice { get; private set; } = null!;
 
-    private LineItem(
-        LineItemId id,
-        ProductId productId,
-        string productName,
-        int quantity,
-        Money unitPrice) : base(id)
+    /// <summary>EF Core constructor.</summary>
+    private LineItem() : base(default!) { }
+
+    internal LineItem(LineItemId id, ProductId productId, ProductName productName, LineItemQuantity quantity, Money unitPrice)
+        : base(id)
     {
         ProductId = productId;
         ProductName = productName;
         Quantity = quantity;
         UnitPrice = unitPrice;
-    }
-
-    // EF Core constructor
-    private LineItem() : base(default!)
-    {
     }
 }

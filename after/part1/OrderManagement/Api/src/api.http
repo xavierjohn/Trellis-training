@@ -1,276 +1,99 @@
-### Health Check
-// 200 OK
-GET {{HostAddress}}/health
+﻿### Create a todo (admin)
+# @name createTodo
+POST {{host}}/api/Todos?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "title": "Buy groceries",
+  "dueDate": "2026-04-01T12:00:00Z",
+  "tag": "shopping"
+}
+
+### Create a todo without tag
+POST {{host}}/api/Todos?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "title": "Finish quarterly report",
+  "dueDate": "2026-03-31T17:00:00Z"
+}
+
+### Get todo by ID
+GET {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
 Accept: application/json
+X-Test-Actor: {{userActor}}
 
-###
-
-### ── Customers ────────────────────────────────────────────────────────────── ###
-
-### Create customer (with phone) → 201
-// @name createCustomer
-POST {{HostAddress}}/api/Customers?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "firstName": "Alice",
-  "lastName": "Smith",
-  "email": "alice@example.com",
-  "phoneNumber": "+14155550100",
-  "street": "123 Main St",
-  "city": "Springfield",
-  "state": "IL",
-  "postalCode": "62701",
-  "country": "US"
-}
-
-###
-
-### Create customer (without phone) → 201
-// @name createCustomerNoPhone
-POST {{HostAddress}}/api/Customers?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "firstName": "Bob",
-  "lastName": "Jones",
-  "email": "bob@example.com",
-  "phoneNumber": null,
-  "street": "456 Oak Ave",
-  "city": "Shelbyville",
-  "state": "IL",
-  "postalCode": "62565",
-  "country": "US"
-}
-
-###
-
-### Duplicate email → 409
-POST {{HostAddress}}/api/Customers?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "firstName": "Alice",
-  "lastName": "Smith",
-  "email": "alice@example.com",
-  "phoneNumber": null,
-  "street": "123 Main St",
-  "city": "Springfield",
-  "state": "IL",
-  "postalCode": "62701",
-  "country": "US"
-}
-
-###
-
-### Missing permission → 403 (customerAliceActor lacks customers:create)
-POST {{HostAddress}}/api/Customers?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{customerAliceActor}}
-
-{
-  "firstName": "Carol",
-  "lastName": "White",
-  "email": "carol@example.com",
-  "phoneNumber": null,
-  "street": "789 Pine Rd",
-  "city": "Capital City",
-  "state": "IL",
-  "postalCode": "62000",
-  "country": "US"
-}
-
-###
-
-### ── Products ─────────────────────────────────────────────────────────────── ###
-
-### Create product → 201
-// @name createProduct
-POST {{HostAddress}}/api/Products?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "productName": "Widget Pro",
-  "sku": "WGTPRO001",
-  "unitPriceAmount": 29.99,
-  "unitPriceCurrency": "USD"
-}
-
-###
-
-### Duplicate SKU → 409
-POST {{HostAddress}}/api/Products?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "productName": "Widget Pro v2",
-  "sku": "WGTPRO001",
-  "unitPriceAmount": 39.99,
-  "unitPriceCurrency": "USD"
-}
-
-###
-
-### Add stock → 200
-// @name addStock
-POST {{HostAddress}}/api/Products/{{createProduct.response.body.id}}/stock?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "quantity": 100
-}
-
-###
-
-### ── Orders ───────────────────────────────────────────────────────────────── ###
-
-### Create draft order (empty line items) → 201
-// @name createOrder
-POST {{HostAddress}}/api/Orders?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{customerAliceActor}}
-
-{
-  "customerId": "{{createCustomer.response.body.id}}",
-  "lineItems": []
-}
-
-###
-
-### Get order by ID → 200
-GET {{HostAddress}}/api/Orders/{{createOrder.response.body.id}}?api-version={{apiVersion}}
+### Get overdue todos
+GET {{host}}/api/Todos/overdue?api-version={{apiVersion}}
 Accept: application/json
-X-Test-Actor: {{customerAliceActor}}
+X-Test-Actor: {{userActor}}
 
-###
-
-### Add line item → 200
-// @name addLineItem
-POST {{HostAddress}}/api/Orders/{{createOrder.response.body.id}}/line-items?api-version={{apiVersion}}
+### Update todo
+PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
 Content-Type: application/json
-X-Test-Actor: {{customerAliceActor}}
-
-{
-  "productId": "{{createProduct.response.body.id}}",
-  "quantity": 2
-}
-
-###
-
-### Remove line item → 200
-DELETE {{HostAddress}}/api/Orders/{{createOrder.response.body.id}}/line-items/{{addLineItem.response.body.lineItems[0].id}}?api-version={{apiVersion}}
-X-Test-Actor: {{customerAliceActor}}
-
-###
-
-### Add line item again (for subsequent lifecycle steps) → 200
-// @name addLineItem2
-POST {{HostAddress}}/api/Orders/{{createOrder.response.body.id}}/line-items?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{customerAliceActor}}
-
-{
-  "productId": "{{createProduct.response.body.id}}",
-  "quantity": 3
-}
-
-###
-
-### Submit order → 200
-// @name submitOrder
-POST {{HostAddress}}/api/Orders/{{createOrder.response.body.id}}/submit?api-version={{apiVersion}}
-X-Test-Actor: {{customerAliceActor}}
-
-###
-
-### Approve order → 200
-// @name approveOrder
-POST {{HostAddress}}/api/Orders/{{createOrder.response.body.id}}/approve?api-version={{apiVersion}}
 X-Test-Actor: {{adminActor}}
 
-###
+{
+  "title": "Buy organic groceries",
+  "dueDate": "2026-04-15T12:00:00Z",
+  "tag": "health"
+}
 
-### Ship order → 200
-// @name shipOrder
-POST {{HostAddress}}/api/Orders/{{createOrder.response.body.id}}/ship?api-version={{apiVersion}}
+### Update todo with past due date (→ 400)
+PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+Content-Type: application/json
 X-Test-Actor: {{adminActor}}
 
-###
+{
+  "title": "Too late",
+  "dueDate": "2020-01-01T12:00:00Z"
+}
 
-### Deliver order → 200
-// @name deliverOrder
-POST {{HostAddress}}/api/Orders/{{createOrder.response.body.id}}/deliver?api-version={{apiVersion}}
+### Complete todo (by creator)
+POST {{host}}/api/Todos/{{createTodo.response.body.id}}/complete?api-version={{apiVersion}}
 X-Test-Actor: {{adminActor}}
 
-###
+### Complete todo (by non-creator → 403)
+POST {{host}}/api/Todos/{{createTodo.response.body.id}}/complete?api-version={{apiVersion}}
+X-Test-Actor: {{userActor}}
 
-### Return order (Part 2 feature) → 200
-POST {{HostAddress}}/api/Orders/{{createOrder.response.body.id}}/return?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{customerAliceActor}}
+### Delete todo
+DELETE {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
 
-{
-  "reason": "Item arrived damaged"
-}
-
-###
-
-### ── Cancel order scenarios ───────────────────────────────────────────────── ###
-
-### Create a second draft order (for cancel tests) → 201
-// @name createOrderForCancel
-POST {{HostAddress}}/api/Orders?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{customerAliceActor}}
-
-{
-  "customerId": "{{createCustomer.response.body.id}}",
-  "lineItems": []
-}
-
-###
-
-### Cancel order by owner (alice cancels her own order) → 200
-POST {{HostAddress}}/api/Orders/{{createOrderForCancel.response.body.id}}/cancel?api-version={{apiVersion}}
-X-Test-Actor: {{customerAliceActor}}
-
-###
-
-### Create a third draft order (for non-owner cancel test) → 201
-// @name createOrderForCancelForbidden
-POST {{HostAddress}}/api/Orders?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{customerAliceActor}}
-
-{
-  "customerId": "{{createCustomer.response.body.id}}",
-  "lineItems": []
-}
-
-###
-
-### Cancel order by non-owner → 403 (bob tries to cancel alice's order)
-POST {{HostAddress}}/api/Orders/{{createOrderForCancelForbidden.response.body.id}}/cancel?api-version={{apiVersion}}
-X-Test-Actor: {{customerBobActor}}
-
-###
-
-### ── Order queries ────────────────────────────────────────────────────────── ###
-
-### List orders by customer → 200
-GET {{HostAddress}}/api/Orders/by-customer/{{createCustomer.response.body.id}}?api-version={{apiVersion}}
+### Get deleted todo (→ 404)
+GET {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
 Accept: application/json
+X-Test-Actor: {{userActor}}
+
+### Bad Request — empty title
+POST {{host}}/api/Todos?api-version={{apiVersion}}
+Content-Type: application/json
 X-Test-Actor: {{adminActor}}
 
-###
+{
+  "title": "",
+  "dueDate": "2026-04-01T12:00:00Z"
+}
 
-### List overdue orders → 200
-GET {{HostAddress}}/api/Orders/overdue?api-version={{apiVersion}}
+### Bad Request — invalid tag
+POST {{host}}/api/Todos?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "title": "Test invalid tag",
+  "dueDate": "2026-04-01T12:00:00Z",
+  "tag": "INVALID TAG"
+}
+
+### Not Found — nonexistent todo
+GET {{host}}/api/Todos/00000000-0000-0000-0000-000000000001?api-version={{apiVersion}}
 Accept: application/json
-X-Test-Actor: {{adminActor}}
+X-Test-Actor: {{userActor}}
+
+### Throw (error handling middleware test)
+GET {{host}}/api/Todos/throw?api-version={{apiVersion}}
+Accept: application/json

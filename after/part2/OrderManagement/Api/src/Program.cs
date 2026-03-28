@@ -1,28 +1,30 @@
-﻿using OrderManagement.AntiCorruptionLayer;
+﻿using Scalar.AspNetCore;
+using ServiceLevelIndicators;
+using OrderManagement.AntiCorruptionLayer;
 using OrderManagement.Api;
 using OrderManagement.Api.Middleware;
 using OrderManagement.Application;
-using Scalar.AspNetCore;
-using ServiceLevelIndicators;
 using Trellis.Asp;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-
 builder.Services
-    .AddPresentation(builder.Environment, builder.Configuration)
+    .AddPresentation(builder.Environment)
     .AddApplication()
-    .AddAntiCorruptionLayer(builder.Configuration);
+    .AddAntiCorruptionLayer(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=OrderManagement.db");
 
 var app = builder.Build();
 
+// Create database schema in development (use migrations in production)
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<OrderManagement.AntiCorruptionLayer.AppDbContext>();
-    db.Database.EnsureCreated();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.EnsureCreatedAsync();
+}
 
+if (app.Environment.IsDevelopment())
+{
     app.MapOpenApi().WithDocumentPerVersion();
     app.MapScalarApiReference(
         options =>
@@ -39,7 +41,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseAuthentication();
 app.UseAuthorization();
 app.UseScalarValueValidation();
 app.UseServiceLevelIndicator();

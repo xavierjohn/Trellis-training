@@ -1,20 +1,23 @@
-namespace OrderManagement.Domain.Specifications;
+namespace OrderManagement.Domain;
 
 using System.Linq.Expressions;
 
+/// <summary>
+/// Matches orders that are overdue: in Submitted status for more than 7 days without being approved.
+/// </summary>
 public class OverdueOrderSpecification : Specification<Order>
 {
-    private readonly DateTime _cutoff;
+    private readonly DateTime _asOf;
 
-    public OverdueOrderSpecification()
-    {
-        _cutoff = DateTime.UtcNow.AddDays(-7);
-    }
+    /// <summary>
+    /// Creates a specification that checks for overdue orders relative to the given date.
+    /// Orders submitted before this cutoff date are considered overdue.
+    /// </summary>
+    public OverdueOrderSpecification(DateTime asOf) => _asOf = asOf;
 
-    // Must not cache since _cutoff captures mutable state (current time)
-    protected override bool CacheCompilation => false;
-
+    /// <inheritdoc />
     public override Expression<Func<Order, bool>> ToExpression() =>
-        order => order.Status == OrderStatus.Submitted
-              && order.SubmittedAt.GetValueOrDefault(DateTime.MaxValue) < _cutoff;
+        order => order.Status == OrderStatus.Submitted &&
+                 order.SubmittedAt.HasValue &&
+                 order.SubmittedAt.GetValueOrDefault(DateTime.MaxValue) < _asOf;
 }

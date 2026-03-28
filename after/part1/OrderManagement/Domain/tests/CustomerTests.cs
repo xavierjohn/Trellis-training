@@ -1,42 +1,64 @@
 namespace Domain.Tests;
 
+using OrderManagement.Domain;
+using Trellis.Primitives;
+
+#pragma warning disable TRLS003 // Tests assert success before accessing .Value
+
 public class CustomerTests
 {
+    private static CustomerFirstName TestFirstName => CustomerFirstName.Create("Jane");
+    private static CustomerLastName TestLastName => CustomerLastName.Create("Smith");
+    private static EmailAddress TestEmail => EmailAddress.Create("jane.smith@example.com");
+    private static ShippingAddress TestAddress =>
+        ShippingAddress.TryCreate("1 Oak Ave", "Portland", "OR", "97201", "US").Value;
+
     [Fact]
-    public void TryCreate_WithValidData_ReturnsCustomer()
+    public void TryCreate_with_all_required_fields_succeeds()
     {
-        var firstName = FirstName.Create("John");
-        var lastName = LastName.Create("Doe");
-        var email = EmailAddress.Create("john.doe@example.com");
-        ShippingAddress.TryCreate("123 Main St", "Anytown", "CA", "12345", "USA").TryGetValue(out var address);
+        var result = Customer.TryCreate(TestFirstName, TestLastName, TestEmail, Maybe<PhoneNumber>.None, TestAddress);
 
-        var result = Customer.TryCreate(firstName, lastName, email, Maybe<PhoneNumber>.None, address!);
-
-        result.Should().BeSuccess()
-            .Which.Email.Should().Be(email);
+        result.Should().BeSuccess();
+        var customer = result.Value;
+        customer.FirstName.Should().Be(TestFirstName);
+        customer.LastName.Should().Be(TestLastName);
+        customer.Email.Should().Be(TestEmail);
+        customer.PhoneNumber.Should().BeNone();
     }
 
     [Fact]
-    public void TryCreate_WithPhone_IncludesPhone()
+    public void TryCreate_with_phone_number_preserves_phone()
     {
-        var firstName = FirstName.Create("Jane");
-        var lastName = LastName.Create("Smith");
-        var email = EmailAddress.Create("jane@example.com");
-        var phone = PhoneNumber.Create("+14155551234");
-        ShippingAddress.TryCreate("456 Elm St", "Springfield", "IL", "62701", "USA").TryGetValue(out var address);
+        var phone = PhoneNumber.Create("+15035550101");
 
-        var result = Customer.TryCreate(firstName, lastName, email, phone, address!);
+        var result = Customer.TryCreate(TestFirstName, TestLastName, TestEmail, Maybe.From(phone), TestAddress);
 
-        result.Should().BeSuccess()
-            .Which.PhoneNumber.Should().HaveValue();
+        result.Should().BeSuccess();
+        result.Value.PhoneNumber.Should().HaveValueEqualTo(phone);
     }
 
     [Fact]
-    public void ShippingAddress_WithMissingStreet_ReturnsValidationError()
+    public void TryCreate_without_phone_number_has_none()
     {
-        var result = ShippingAddress.TryCreate("", "City", "State", "12345", "USA");
+        var result = Customer.TryCreate(TestFirstName, TestLastName, TestEmail, Maybe<PhoneNumber>.None, TestAddress);
 
-        result.Should().BeFailure()
-            .Which.Should().BeOfType<ValidationError>();
+        result.Should().BeSuccess();
+        result.Value.PhoneNumber.Should().BeNone();
+    }
+
+    [Fact]
+    public void CustomerFirstName_blank_fails_validation()
+    {
+        var result = CustomerFirstName.TryCreate("");
+
+        result.Should().BeFailure();
+    }
+
+    [Fact]
+    public void EmailAddress_invalid_format_fails_validation()
+    {
+        var result = EmailAddress.TryCreate("not-a-valid-email");
+
+        result.Should().BeFailure();
     }
 }

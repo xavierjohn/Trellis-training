@@ -1,29 +1,28 @@
 ﻿namespace Api.Tests;
 
-using System;
-using Application.Tests;
 using MartinCostello.Logging.XUnit;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using OrderManagement.AntiCorruptionLayer;
 using Trellis.EntityFrameworkCore;
-using Xunit.Sdk;
 using Xunit.v3;
 
 public class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>, ITestOutputHelperAccessor
 {
     private readonly SqliteConnection _connection;
-    private bool _dbInitialized;
 
     public TestWebApplicationFactoryFixture()
     {
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+
+        // Keep a persistent connection for in-memory SQLite
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
     }
@@ -32,19 +31,25 @@ public class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>, 
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.ConfigureLogging((p) => p.AddXUnit(this));
+        builder.ConfigureLogging(p => p.AddXUnit(this));
 
         builder.ConfigureServices(services =>
         {
-            // Replace EF DbContext with SQLite in-memory
+            // Remove the production database registration
             services.RemoveAll<DbContextOptions<AppDbContext>>();
-            services.RemoveAll<AppDbContext>();
 
-            var interceptor = new MaybeQueryInterceptor();
             services.AddDbContext<AppDbContext>(options =>
                 options.UseSqlite(_connection)
-                       .AddInterceptors(interceptor)
-                       .ConfigureWarnings(w => w.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning)));
+                       .AddTrellisInterceptors());
+        });
+
+        // Register a version-neutral throw endpoint for middleware testing.
+        // WebApplication implements IEndpointRouteBuilder, so this endpoint participates in endpoint
+        // routing and its exceptions are caught by ErrorHandlingMiddleware.
+        builder.Configure(app =>
+        {
+            if (app is IEndpointRouteBuilder erb)
+                erb.MapGet("/test/throw", _ => throw new InvalidOperationException("Test unhandled exception"));
         });
     }
 
@@ -52,18 +57,7 @@ public class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>, 
     {
         base.Dispose(disposing);
         if (disposing)
-        {
             _connection.Dispose();
-        }
-    }
-
-    public void EnsureDbCreated()
-    {
-        if (_dbInitialized) return;
-        _dbInitialized = true;
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        db.Database.EnsureCreated();
     }
 }
 

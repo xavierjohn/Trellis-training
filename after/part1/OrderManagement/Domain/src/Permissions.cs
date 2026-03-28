@@ -1,9 +1,12 @@
 namespace OrderManagement.Domain;
 
+/// <summary>Permission constants for order management operations.</summary>
 public static class Permissions
 {
     public const string CustomersCreate = "customers:create";
+    public const string CustomersRead = "customers:read";
     public const string ProductsCreate = "products:create";
+    public const string ProductsRead = "products:read";
     public const string ProductsManageStock = "products:manage-stock";
     public const string OrdersCreate = "orders:create";
     public const string OrdersSubmit = "orders:submit";

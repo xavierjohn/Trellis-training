@@ -1,87 +1,82 @@
 namespace Domain.Tests;
 
+using OrderManagement.Domain;
+using Trellis.Primitives;
+
+#pragma warning disable TRLS003 // Tests assert success before accessing .Value
+
 public class ProductTests
 {
+    private static ProductName TestProductName => ProductName.Create("Widget Pro");
+    private static Sku TestSku => Sku.Create("WGT-PRO01");
+    private static Money TestPrice => Money.Create(9.99m, "USD");
+
     [Fact]
-    public void TryCreate_WithValidData_ReturnsProduct()
+    public void TryCreate_valid_product_with_zero_initial_stock()
     {
-        var name = ProductName.Create("Widget");
-        var price = Money.Create(9.99m, "USD");
-        Sku.TryCreate("WIDGET001").TryGetValue(out var sku);
+        var result = Product.TryCreate(TestProductName, TestSku, TestPrice);
 
-        var result = Product.TryCreate(name, sku!, price);
-
-        result.Should().BeSuccess()
-            .Which.StockQuantity.Should().Be(0);
+        result.Should().BeSuccess();
+        var product = result.Value;
+        product.ProductName.Should().Be(TestProductName);
+        product.Sku.Should().Be(TestSku);
+        product.UnitPrice.Should().Be(TestPrice);
+        product.StockQuantity.Value.Should().Be(0);
     }
 
     [Fact]
-    public void AddStock_WithPositiveQuantity_IncreasesStock()
+    public void TryCreate_with_zero_price_fails()
     {
-        var product = CreateTestProduct();
+        var zeroPrice = Money.Create(0m, "USD");
 
-        var result = product.AddStock(50);
+        var result = Product.TryCreate(TestProductName, TestSku, zeroPrice);
 
-        result.Should().BeSuccess()
-            .Which.StockQuantity.Should().Be(50);
-    }
-
-    [Fact]
-    public void AddStock_WithNegativeQuantity_ReturnsValidationError()
-    {
-        var product = CreateTestProduct();
-
-        var result = product.AddStock(-1);
-
-        result.Should().BeFailure()
-            .Which.Should().BeOfType<ValidationError>();
-    }
-
-    [Fact]
-    public void ReserveStock_WithSufficientStock_ReservesSuccessfully()
-    {
-        var product = CreateTestProduct();
-        _ = product.AddStock(100);
-
-        var result = product.ReserveStock(30);
-
-        result.Should().BeSuccess()
-            .Which.StockQuantity.Should().Be(70);
-    }
-
-    [Fact]
-    public void ReserveStock_WithInsufficientStock_ReturnsDomainError()
-    {
-        var product = CreateTestProduct();
-        _ = product.AddStock(10);
-
-        var result = product.ReserveStock(50);
-
-        result.Should().BeFailure()
-            .Which.Should().BeOfType<DomainError>();
-    }
-
-    [Fact]
-    public void Sku_WithInvalidFormat_ReturnsValidationError()
-    {
-        var result = Sku.TryCreate("invalid sku!");
-        result.Should().BeFailure()
-            .Which.Should().BeOfType<ValidationError>();
-    }
-
-    [Fact]
-    public void Sku_TooShort_ReturnsValidationError()
-    {
-        var result = Sku.TryCreate("AB");
         result.Should().BeFailure();
     }
 
-    private static Product CreateTestProduct()
+    [Fact]
+    public void AddStock_increases_quantity()
     {
-        var name = ProductName.Create("Test Product");
-        var price = Money.Create(10m, "USD");
-        Sku.TryCreate("TESTPROD001").TryGetValue(out var sku);
-        Product.TryCreate(name, sku!, price).TryGetValue(out var product);
-        return product!;
+        var product = Product.TryCreate(TestProductName, TestSku, TestPrice).Value;
+
+        var result = product.AddStock(StockQuantity.Create(10));
+
+        result.Should().BeSuccess();
+        product.StockQuantity.Value.Should().Be(10);
+    }
+
+    [Fact]
+    public void ReserveStock_decreases_quantity()
+    {
+        var product = Product.TryCreate(TestProductName, TestSku, TestPrice).Value;
+        product.AddStock(StockQuantity.Create(10)).Should().BeSuccess();
+
+        var result = product.ReserveStock(LineItemQuantity.Create(3));
+
+        result.Should().BeSuccess();
+        product.StockQuantity.Value.Should().Be(7);
+    }
+
+    [Fact]
+    public void ReserveStock_with_insufficient_stock_fails()
+    {
+        var product = Product.TryCreate(TestProductName, TestSku, TestPrice).Value;
+        product.AddStock(StockQuantity.Create(2)).Should().BeSuccess();
+
+        var result = product.ReserveStock(LineItemQuantity.Create(5));
+
+        result.Should().BeFailure();
+    }
+
+    [Fact]
+    public void ReleaseStock_after_reserve_restores_quantity()
+    {
+        var product = Product.TryCreate(TestProductName, TestSku, TestPrice).Value;
+        product.AddStock(StockQuantity.Create(10)).Should().BeSuccess();
+        product.ReserveStock(LineItemQuantity.Create(3)).Should().BeSuccess();
+
+        product.ReleaseStock(LineItemQuantity.Create(3));
+
+        product.StockQuantity.Value.Should().Be(10);
     }
 }

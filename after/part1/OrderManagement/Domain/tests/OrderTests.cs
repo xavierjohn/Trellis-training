@@ -1,155 +1,266 @@
 namespace Domain.Tests;
 
+using OrderManagement.Domain;
+using Trellis.Primitives;
+
+#pragma warning disable TRLS003 // Tests assert success before accessing .Value
+
 public class OrderTests
 {
+    private static CustomerId TestCustomerId => CustomerId.NewUniqueV7();
+
+    private static OrderLineItemInput MakeLineItem(ProductId? productId = null) =>
+        new(productId ?? ProductId.NewUniqueV7(),
+            ProductName.Create("Widget"),
+            LineItemQuantity.Create(1),
+            Money.Create(9.99m, "USD"));
+
+    private static Order CreateDraftOrder(string actorId = "actor-1") =>
+        Order.TryCreate(TestCustomerId, actorId, [MakeLineItem()]).Value;
+
     [Fact]
-    public void TryCreate_WithValidData_CreatesDraftOrder()
+    public void TryCreate_with_one_line_item_creates_draft_order()
     {
-        var customerId = CustomerId.NewUniqueV4();
-        var product = CreateTestProduct("SKU001");
-        _ = product.AddStock(100);
-        var price = Money.Create(10m, "USD");
+        var result = Order.TryCreate(TestCustomerId, "actor-1", [MakeLineItem()]);
 
-        var result = Order.TryCreate(
-            customerId,
-            "actor-1",
-            [(product.Id, "Test Product", 5, price)]);
-
-        result.Should().BeSuccess()
-            .Which.Status.Should().Be(OrderStatus.Draft);
+        result.Should().BeSuccess();
+        var order = result.Value;
+        order.Status.Should().Be(OrderStatus.Draft);
+        order.LineItems.Should().HaveCount(1);
+        order.CreatedByActorId.Should().Be("actor-1");
     }
 
     [Fact]
-    public void Submit_WithStock_TransitionsToSubmitted()
+    public void TryCreate_with_multiple_distinct_products_succeeds()
     {
-        var (order, products) = CreateOrderWithProducts();
+        var items = new[] { MakeLineItem(), MakeLineItem() };
 
-        var result = order.Submit(products);
+        var result = Order.TryCreate(TestCustomerId, "actor-1", items);
 
-        result.Should().BeSuccess()
-            .Which.Status.Should().Be(OrderStatus.Submitted);
+        result.Should().BeSuccess();
+        result.Value.LineItems.Should().HaveCount(2);
     }
 
     [Fact]
-    public void Submit_AlreadySubmitted_ReturnsConflictError()
+    public void TryCreate_with_no_line_items_fails()
     {
-        var (order, products) = CreateOrderWithProducts();
-        _ = order.Submit(products);
+        var result = Order.TryCreate(TestCustomerId, "actor-1", []);
 
-        var result = order.Submit(products);
-
-        result.Should().BeFailure()
-            .Which.Should().BeOfType<ConflictError>();
+        result.Should().BeFailure();
     }
 
     [Fact]
-    public void Submit_InsufficientStock_ReturnsDomainError()
+    public void TryCreate_with_duplicate_products_fails()
     {
-        var product = CreateTestProduct("LOWSTOCK1");
-        _ = product.AddStock(1);
-        var price = Money.Create(10m, "USD");
-        var customerId = CustomerId.NewUniqueV4();
-        Order.TryCreate(customerId, "actor-1", [(product.Id, "Low Stock", 5, price)]).TryGetValue(out var order);
+        var productId = ProductId.NewUniqueV7();
 
-        var result = order!.Submit([product]);
+        var result = Order.TryCreate(TestCustomerId, "actor-1", [MakeLineItem(productId), MakeLineItem(productId)]);
 
-        result.Should().BeFailure()
-            .Which.Should().BeOfType<DomainError>();
+        result.Should().BeFailure();
     }
 
     [Fact]
-    public void Approve_AfterSubmit_TransitionsToApproved()
+    public void AddLineItem_to_draft_order_succeeds()
     {
-        var (order, products) = CreateOrderWithProducts();
-        _ = order.Submit(products);
+        var order = CreateDraftOrder();
+        var newProductId = ProductId.NewUniqueV7();
 
-        var result = order.Approve();
+        var result = order.AddLineItem(newProductId, ProductName.Create("Gadget"), LineItemQuantity.Create(2), Money.Create(5.00m, "USD"));
 
-        result.Should().BeSuccess()
-            .Which.Status.Should().Be(OrderStatus.Approved);
+        result.Should().BeSuccess();
+        order.LineItems.Should().HaveCount(2);
     }
 
     [Fact]
-    public void Ship_AfterApprove_TransitionsToShipped()
+    public void AddLineItem_duplicate_product_fails()
     {
-        var (order, products) = CreateOrderWithProducts();
-        _ = order.Submit(products);
-        _ = order.Approve();
+        var productId = ProductId.NewUniqueV7();
+        var order = Order.TryCreate(TestCustomerId, "actor-1", [MakeLineItem(productId)]).Value;
 
-        var result = order.Ship();
+        var result = order.AddLineItem(productId, ProductName.Create("Widget"), LineItemQuantity.Create(1), Money.Create(9.99m, "USD"));
 
-        result.Should().BeSuccess()
-            .Which.Status.Should().Be(OrderStatus.Shipped);
+        result.Should().BeFailure();
     }
 
     [Fact]
-    public void Deliver_AfterShip_TransitionsToDelivered()
+    public void RemoveLineItem_from_order_with_multiple_items_succeeds()
     {
-        var (order, products) = CreateOrderWithProducts();
-        _ = order.Submit(products);
-        _ = order.Approve();
-        _ = order.Ship();
+        var order = Order.TryCreate(TestCustomerId, "actor-1", [MakeLineItem(), MakeLineItem()]).Value;
+        var lineItemId = order.LineItems[0].Id;
 
-        var result = order.Deliver();
+        var result = order.RemoveLineItem(lineItemId);
 
-        result.Should().BeSuccess()
-            .Which.Status.Should().Be(OrderStatus.Delivered);
+        result.Should().BeSuccess();
+        order.LineItems.Should().HaveCount(1);
     }
 
     [Fact]
-    public void Cancel_DraftOrder_TransitionsToCancelled()
+    public void RemoveLineItem_last_item_fails()
     {
-        var (order, _) = CreateOrderWithProducts();
+        var order = CreateDraftOrder();
+        var lineItemId = order.LineItems[0].Id;
 
-        var result = order.Cancel();
+        var result = order.RemoveLineItem(lineItemId);
 
-        result.Should().BeSuccess()
-            .Which.Status.Should().Be(OrderStatus.Cancelled);
+        result.Should().BeFailure();
     }
 
-    [Fact]
-    public void Cancel_Delivered_ReturnsConflictError()
-    {
-        var (order, products) = CreateOrderWithProducts();
-        _ = order.Submit(products);
-        _ = order.Approve();
-        _ = order.Ship();
-        _ = order.Deliver();
-
-        var result = order.Cancel();
-
-        result.Should().BeFailure()
-            .Which.Should().BeOfType<ConflictError>();
-    }
+    // --- State machine: valid transitions ---
 
     [Fact]
-    public void SubmittedAt_AfterSubmit_HasValue()
+    public void Submit_from_Draft_transitions_to_Submitted_and_sets_SubmittedAt()
     {
-        var (order, products) = CreateOrderWithProducts();
+        var order = CreateDraftOrder();
 
-        _ = order.Submit(products);
+        var result = order.Submit();
 
+        result.Should().BeSuccess();
+        order.Status.Should().Be(OrderStatus.Submitted);
         order.SubmittedAt.Should().HaveValue();
     }
 
-    private static (Order order, List<Product> products) CreateOrderWithProducts()
+    [Fact]
+    public void Approve_from_Submitted_transitions_to_Approved()
     {
-        var product = CreateTestProduct("TESTPROD1");
-        _ = product.AddStock(100);
-        var price = Money.Create(10m, "USD");
-        var customerId = CustomerId.NewUniqueV4();
+        var order = CreateDraftOrder();
+        order.Submit().Should().BeSuccess();
 
-        Order.TryCreate(customerId, "actor-1", [(product.Id, "Test Product", 5, price)]).TryGetValue(out var order);
+        var result = order.Approve();
 
-        return (order!, [product]);
+        result.Should().BeSuccess();
+        order.Status.Should().Be(OrderStatus.Approved);
     }
 
-    private static Product CreateTestProduct(string sku)
+    [Fact]
+    public void Ship_from_Approved_transitions_to_Shipped_and_sets_ShippedAt()
     {
-        var name = ProductName.Create("Test Product");
-        var price = Money.Create(10m, "USD");
-        Sku.TryCreate(sku).TryGetValue(out var skuVal);
-        Product.TryCreate(name, skuVal!, price).TryGetValue(out var product);
-        return product!;
+        var order = CreateDraftOrder();
+        order.Submit().Should().BeSuccess();
+        order.Approve().Should().BeSuccess();
+
+        var result = order.Ship();
+
+        result.Should().BeSuccess();
+        order.Status.Should().Be(OrderStatus.Shipped);
+        order.ShippedAt.Should().HaveValue();
+    }
+
+    [Fact]
+    public void Deliver_from_Shipped_transitions_to_Delivered()
+    {
+        var order = CreateDraftOrder();
+        order.Submit().Should().BeSuccess();
+        order.Approve().Should().BeSuccess();
+        order.Ship().Should().BeSuccess();
+
+        var result = order.Deliver();
+
+        result.Should().BeSuccess();
+        order.Status.Should().Be(OrderStatus.Delivered);
+    }
+
+    [Fact]
+    public void Cancel_from_Draft_transitions_to_Cancelled()
+    {
+        var order = CreateDraftOrder();
+
+        var result = order.Cancel();
+
+        result.Should().BeSuccess();
+        order.Status.Should().Be(OrderStatus.Cancelled);
+    }
+
+    [Fact]
+    public void Cancel_from_Submitted_transitions_to_Cancelled()
+    {
+        var order = CreateDraftOrder();
+        order.Submit().Should().BeSuccess();
+
+        var result = order.Cancel();
+
+        result.Should().BeSuccess();
+        order.Status.Should().Be(OrderStatus.Cancelled);
+    }
+
+    [Fact]
+    public void Cancel_from_Approved_transitions_to_Cancelled()
+    {
+        var order = CreateDraftOrder();
+        order.Submit().Should().BeSuccess();
+        order.Approve().Should().BeSuccess();
+
+        var result = order.Cancel();
+
+        result.Should().BeSuccess();
+        order.Status.Should().Be(OrderStatus.Cancelled);
+    }
+
+    // --- State machine: invalid transitions ---
+
+    [Fact]
+    public void Invalid_transition_Deliver_from_Draft_fails()
+    {
+        var order = CreateDraftOrder();
+
+        var result = order.Deliver();
+
+        result.Should().BeFailure();
+    }
+
+    [Fact]
+    public void Cannot_cancel_from_Delivered_status()
+    {
+        var order = CreateDraftOrder();
+        order.Submit().Should().BeSuccess();
+        order.Approve().Should().BeSuccess();
+        order.Ship().Should().BeSuccess();
+        order.Deliver().Should().BeSuccess();
+
+        var result = order.Cancel();
+
+        result.Should().BeFailure();
+    }
+
+    // --- Domain events ---
+
+    [Fact]
+    public void Submit_raises_OrderSubmittedEvent()
+    {
+        var order = CreateDraftOrder();
+        order.AcceptChanges();
+
+        order.Submit().Should().BeSuccess();
+
+        order.UncommittedEvents().Should().ContainSingle()
+            .Which.Should().BeOfType<OrderSubmittedEvent>();
+    }
+
+    // --- HadStockReserved ---
+
+    [Fact]
+    public void HadStockReserved_is_false_for_draft_order()
+    {
+        var order = CreateDraftOrder();
+
+        order.HadStockReserved.Should().BeFalse();
+    }
+
+    [Fact]
+    public void HadStockReserved_is_true_after_submit()
+    {
+        var order = CreateDraftOrder();
+        order.Submit().Should().BeSuccess();
+
+        order.HadStockReserved.Should().BeTrue();
+    }
+
+    [Fact]
+    public void HadStockReserved_is_true_after_approve()
+    {
+        var order = CreateDraftOrder();
+        order.Submit().Should().BeSuccess();
+        order.Approve().Should().BeSuccess();
+
+        order.HadStockReserved.Should().BeTrue();
     }
 }

@@ -1,9 +1,11 @@
 namespace OrderManagement.Domain;
 
-using OrderManagement.Domain.Events;
 using Trellis.Primitives;
 using Trellis.Stateless;
 
+/// <summary>
+/// An order placed by a customer, tracking line items and lifecycle through a state machine.
+/// </summary>
 public partial class Order : Aggregate<OrderId>
 {
     private static class Triggers
@@ -13,230 +15,192 @@ public partial class Order : Aggregate<OrderId>
         public const string Ship = "Ship";
         public const string Deliver = "Deliver";
         public const string Cancel = "Cancel";
-        public const string Return = "Return";
     }
 
-    private readonly List<LineItem> _lineItems = [];
-    private readonly LazyStateMachine<string, string> _machine;
+    private readonly LazyStateMachine<OrderStatus, string> _machine;
+    private readonly List<LineItem> _lineItems = new();
 
-    public CustomerId CustomerId { get; private set; } = default!;
-    public string CreatedByActorId { get; private set; } = default!;
-    public OrderStatus Status { get; private set; } = OrderStatus.Draft;
+    /// <summary>The customer who placed this order.</summary>
+    public CustomerId CustomerId { get; private set; } = null!;
+
+    /// <summary>The identity of the actor who created this order.</summary>
+    public string CreatedByActorId { get; private set; } = null!;
+
+    /// <summary>Current lifecycle status.</summary>
+    public OrderStatus Status { get; private set; }
+
+    /// <summary>UTC timestamp when the order was created.</summary>
     public DateTime CreatedAt { get; private set; }
-    public partial Maybe<DateTime> SubmittedAt { get; set; }
-    public partial Maybe<DateTime> ShippedAt { get; set; }
-    public partial Maybe<DateTime> DeliveredAt { get; set; }
-    public partial Maybe<DateTime> ReturnedAt { get; set; }
 
-    public IReadOnlyList<LineItem> LineItems => _lineItems.AsReadOnly();
+    /// <summary>UTC timestamp when the order was submitted, if applicable.</summary>
+    public partial Maybe<DateTime> SubmittedAt { get; private set; }
 
-    public static Result<Order> TryCreate(
-        CustomerId customerId,
-        string actorId,
-        List<(ProductId ProductId, string ProductName, int Quantity, Money UnitPrice)> lineItems)
-    {
-        if (string.IsNullOrWhiteSpace(actorId))
-            return Error.Validation("Actor ID is required", "actorId");
+    /// <summary>UTC timestamp when the order was shipped, if applicable.</summary>
+    public partial Maybe<DateTime> ShippedAt { get; private set; }
 
-        var order = new Order(OrderId.NewUniqueV4(), customerId, actorId);
+    /// <summary>The line items in this order.</summary>
+    public IReadOnlyList<LineItem> LineItems => _lineItems;
 
-        foreach (var (productId, productName, quantity, unitPrice) in lineItems)
-        {
-            var addResult = order.AddLineItemInternal(productId, productName, quantity, unitPrice);
-            if (addResult.IsFailure)
-                return addResult.Error;
-        }
-
-        return order;
-    }
-
-    public Result<Order> AddLineItem(ProductId productId, string productName, int quantity, Money unitPrice)
-    {
-        if (!Status.Is(OrderStatus.Draft))
-            return Error.Conflict("Can only add line items to draft orders");
-
-        return AddLineItemInternal(productId, productName, quantity, unitPrice);
-    }
-
-    public Result<Order> RemoveLineItem(LineItemId lineItemId)
-    {
-        if (!Status.Is(OrderStatus.Draft))
-            return Error.Conflict("Can only remove line items from draft orders");
-
-        var item = _lineItems.FirstOrDefault(li => li.Id == lineItemId);
-        if (item is null)
-            return Error.NotFound($"Line item '{lineItemId}' not found");
-
-        _lineItems.Remove(item);
-        return this;
-    }
-
-    public Result<Order> Submit(List<Product> products)
-    {
-        if (!Status.Is(OrderStatus.Draft))
-            return Error.Conflict($"Order must be in Draft status to submit. Current status: {Status.Value}");
-
-        if (_lineItems.Count == 0)
-            return Error.Domain("Cannot submit an order with no line items");
-
-        // Reserve stock for each line item
-        foreach (var item in _lineItems)
-        {
-            var product = products.FirstOrDefault(p => p.Id == item.ProductId);
-            if (product is null)
-                return Error.NotFound($"Product '{item.ProductId}' not found");
-
-            var reserveResult = product.ReserveStock(item.Quantity);
-            if (reserveResult.TryGetError(out var reserveError))
-                return reserveError;
-        }
-
-        return _machine.FireResult(Triggers.Submit)
-            .Tap(_ =>
-            {
-                var now = DateTime.UtcNow;
-                SubmittedAt = now;
-                DomainEvents.Add(new OrderSubmittedEvent(Id, CustomerId, GetTotal(), now));
-            })
-            .Map(_ => this);
-    }
-
-    public Result<Order> Approve()
-    {
-        return _machine.FireResult(Triggers.Approve)
-            .Tap(_ => DomainEvents.Add(new OrderApprovedEvent(Id, DateTime.UtcNow)))
-            .Map(_ => this);
-    }
-
-    public Result<Order> Ship()
-    {
-        return _machine.FireResult(Triggers.Ship)
-            .Tap(_ =>
-            {
-                var now = DateTime.UtcNow;
-                ShippedAt = now;
-                DomainEvents.Add(new OrderShippedEvent(Id, CustomerId, now));
-            })
-            .Map(_ => this);
-    }
-
-    public Result<Order> Deliver()
-    {
-        return _machine.FireResult(Triggers.Deliver)
-            .Tap(_ =>
-            {
-                var now = DateTime.UtcNow;
-                DeliveredAt = now;
-                DomainEvents.Add(new OrderDeliveredEvent(Id, now));
-            })
-            .Map(_ => this);
-    }
-
-    public Result<Order> Cancel(List<Product>? products = null)
-    {
-        if (!Status.Is(OrderStatus.Draft, OrderStatus.Submitted, OrderStatus.Approved))
-            return Error.Conflict($"Order cannot be cancelled from status: {Status.Value}");
-
-        var previousStatus = Status;
-
-        if (products is not null && Status.Is(OrderStatus.Submitted, OrderStatus.Approved))
-        {
-            foreach (var item in _lineItems)
-            {
-                var product = products.FirstOrDefault(p => p.Id == item.ProductId);
-                if (product is not null)
-                    _ = product.ReleaseStock(item.Quantity);
-            }
-        }
-
-        return _machine.FireResult(Triggers.Cancel)
-            .Tap(_ => DomainEvents.Add(new OrderCancelledEvent(Id, previousStatus, DateTime.UtcNow)))
-            .Map(_ => this);
-    }
-
-    public Result<Order> Return(ReturnReason reason, List<Product> products)
-    {
-        if (!Status.Is(OrderStatus.Delivered))
-            return Error.Conflict($"Order must be in Delivered status to return. Current status: {Status.Value}");
-
-        if (DeliveredAt.GetValueOrDefault(DateTime.MinValue) < DateTime.UtcNow.AddDays(-30))
-            return Error.Domain("Order can only be returned within 30 days of delivery");
-
-        foreach (var item in _lineItems)
-        {
-            var product = products.FirstOrDefault(p => p.Id == item.ProductId);
-            if (product is not null)
-                _ = product.ReleaseStock(item.Quantity);
-        }
-
-        return _machine.FireResult(Triggers.Return)
-            .Tap(_ =>
-            {
-                var now = DateTime.UtcNow;
-                ReturnedAt = now;
-                DomainEvents.Add(new OrderReturnedEvent(Id, CustomerId, reason, now));
-            })
-            .Map(_ => this);
-    }
-
-    private Result<Order> AddLineItemInternal(ProductId productId, string productName, int quantity, Money unitPrice) =>
-        LineItem.TryCreate(productId, productName, quantity, unitPrice)
-            .Tap(item => _lineItems.Add(item))
-            .Map(_ => this);
-
-    private Money GetTotal()
-    {
-        if (_lineItems.Count == 0)
-            return Money.Create(0m, "USD");
-
-        var currency = _lineItems[0].UnitPrice.Currency.Value;
-        var totalAmount = _lineItems.Sum(i => i.UnitPrice.Amount * i.Quantity);
-        return Money.Create(totalAmount, currency);
-    }
-
-    private static void ConfigureMachine(Stateless.StateMachine<string, string> machine)
-    {
-        machine.Configure(OrderStatus.Draft.Value)
-            .Permit(Triggers.Submit, OrderStatus.Submitted.Value)
-            .Permit(Triggers.Cancel, OrderStatus.Cancelled.Value);
-
-        machine.Configure(OrderStatus.Submitted.Value)
-            .Permit(Triggers.Approve, OrderStatus.Approved.Value)
-            .Permit(Triggers.Cancel, OrderStatus.Cancelled.Value);
-
-        machine.Configure(OrderStatus.Approved.Value)
-            .Permit(Triggers.Ship, OrderStatus.Shipped.Value)
-            .Permit(Triggers.Cancel, OrderStatus.Cancelled.Value);
-
-        machine.Configure(OrderStatus.Shipped.Value)
-            .Permit(Triggers.Deliver, OrderStatus.Delivered.Value);
-
-        machine.Configure(OrderStatus.Delivered.Value)
-            .Permit(Triggers.Return, OrderStatus.Returned.Value);
-
-        machine.Configure(OrderStatus.Cancelled.Value);
-
-        machine.Configure(OrderStatus.Returned.Value);
-    }
-
-    private Order(OrderId id, CustomerId customerId, string actorId) : base(id)
-    {
-        CustomerId = customerId;
-        CreatedByActorId = actorId;
-        CreatedAt = DateTime.UtcNow;
-        Status = OrderStatus.Draft;
-        _machine = new LazyStateMachine<string, string>(
-            () => Status.Value,
-            state => { if (OrderStatus.TryFromName(state).TryGetValue(out var s)) Status = s; },
-            ConfigureMachine);
-    }
-
-    // EF Core constructor
+    /// <summary>EF Core constructor.</summary>
     private Order() : base(default!)
     {
-        _machine = new LazyStateMachine<string, string>(
-            () => Status.Value,
-            state => { if (OrderStatus.TryFromName(state).TryGetValue(out var s)) Status = s; },
-            ConfigureMachine);
+        _machine = new LazyStateMachine<OrderStatus, string>(
+            () => Status,
+            s => Status = s,
+            ConfigureStateMachine);
+    }
+
+    private Order(CustomerId customerId, string createdByActorId, IReadOnlyList<OrderLineItemInput> lineItems)
+        : base(OrderId.NewUniqueV7())
+    {
+        CustomerId = customerId;
+        CreatedByActorId = createdByActorId;
+        Status = OrderStatus.Draft;
+        CreatedAt = DateTime.UtcNow;
+
+        _machine = new LazyStateMachine<OrderStatus, string>(
+            () => Status,
+            s => Status = s,
+            ConfigureStateMachine);
+
+        foreach (var item in lineItems)
+            _lineItems.Add(new LineItem(LineItemId.NewUniqueV7(), item.ProductId, item.ProductName, item.Quantity, item.UnitPrice));
+    }
+
+    /// <summary>
+    /// Creates a new draft order for the specified customer with the given line items.
+    /// </summary>
+    public static Result<Order> TryCreate(
+        CustomerId customerId,
+        string createdByActorId,
+        IReadOnlyList<OrderLineItemInput> lineItems) =>
+        Result.Ensure(lineItems.Count > 0,
+                Error.Validation("Order must have at least one line item.", "lineItems"))
+            .Ensure(() => lineItems.Select(li => li.ProductId).Distinct().Count() == lineItems.Count,
+                Error.Validation("An order cannot contain duplicate products.", "lineItems"))
+            .Map(_ => new Order(customerId, createdByActorId, lineItems));
+
+    /// <summary>
+    /// Adds a line item to a draft order. The product must not already be in the order.
+    /// </summary>
+    public Result<Order> AddLineItem(ProductId productId, ProductName productName, LineItemQuantity quantity, Money unitPrice) =>
+        Result.Ensure(Status == OrderStatus.Draft,
+                Error.Validation("Line items can only be added to a draft order.", "status"))
+            .Ensure(() => _lineItems.All(li => li.ProductId != productId),
+                Error.Validation("The product is already in this order.", "productId"))
+            .Map(_ =>
+            {
+                _lineItems.Add(new LineItem(LineItemId.NewUniqueV7(), productId, productName, quantity, unitPrice));
+                return this;
+            });
+
+    /// <summary>
+    /// Removes a line item from a draft order. The order must have more than one line item.
+    /// </summary>
+    public Result<Order> RemoveLineItem(LineItemId lineItemId)
+    {
+        var item = _lineItems.FirstOrDefault(li => li.Id == lineItemId);
+        if (item is null)
+            return Error.NotFound("Line item not found.");
+
+        return Result.Ensure(Status == OrderStatus.Draft,
+                Error.Validation("Line items can only be removed from a draft order.", "status"))
+            .Ensure(() => _lineItems.Count > 1,
+                Error.Validation("Cannot remove the last line item from an order.", "lineItemId"))
+            .Map(_ =>
+            {
+                _lineItems.Remove(item);
+                return this;
+            });
+    }
+
+    /// <summary>
+    /// Submits the order, transitioning from Draft to Submitted and reserving stock.
+    /// Sets SubmittedAt to current UTC time.
+    /// </summary>
+    public Result<Order> Submit() =>
+        _machine.FireResult(Triggers.Submit)
+            .Tap(_ =>
+            {
+                var submittedAt = DateTime.UtcNow;
+                SubmittedAt = submittedAt;
+                DomainEvents.Add(new OrderSubmittedEvent(Id, CustomerId, ComputeTotal(), submittedAt));
+            })
+            .Map(_ => this);
+
+    /// <summary>
+    /// Approves the order, transitioning from Submitted to Approved.
+    /// </summary>
+    public Result<Order> Approve() =>
+        _machine.FireResult(Triggers.Approve)
+            .Tap(_ => DomainEvents.Add(new OrderApprovedEvent(Id, DateTime.UtcNow)))
+            .Map(_ => this);
+
+    /// <summary>
+    /// Ships the order, transitioning from Approved to Shipped. Sets ShippedAt to current UTC time.
+    /// </summary>
+    public Result<Order> Ship() =>
+        _machine.FireResult(Triggers.Ship)
+            .Tap(_ =>
+            {
+                var shippedAt = DateTime.UtcNow;
+                ShippedAt = shippedAt;
+                DomainEvents.Add(new OrderShippedEvent(Id, CustomerId, shippedAt));
+            })
+            .Map(_ => this);
+
+    /// <summary>
+    /// Delivers the order, transitioning from Shipped to Delivered.
+    /// </summary>
+    public Result<Order> Deliver() =>
+        _machine.FireResult(Triggers.Deliver)
+            .Tap(_ => DomainEvents.Add(new OrderDeliveredEvent(Id, DateTime.UtcNow)))
+            .Map(_ => this);
+
+    /// <summary>
+    /// Cancels the order. Valid from Draft, Submitted, or Approved status.
+    /// If the order was Submitted or Approved, the caller should release reserved stock.
+    /// </summary>
+    public Result<Order> Cancel()
+    {
+        var cancelledFromStatus = Status;
+        return _machine.FireResult(Triggers.Cancel)
+            .Tap(_ => DomainEvents.Add(new OrderCancelledEvent(Id, cancelledFromStatus, DateTime.UtcNow)))
+            .Map(_ => this);
+    }
+
+    /// <summary>Computes the order total as the sum of all line item prices.</summary>
+    public Money ComputeTotal() =>
+        _lineItems.Aggregate(
+            Money.Zero("USD").Value,
+            (acc, li) => acc.Add(li.UnitPrice.Multiply(li.Quantity.Value).Value).Value);
+
+    /// <summary>
+    /// Returns true if this order had stock reserved (Submitted or Approved),
+    /// so the caller can release that stock when cancelling.
+    /// </summary>
+    public bool HadStockReserved =>
+        Status is OrderStatus.Submitted or OrderStatus.Approved;
+
+    private static void ConfigureStateMachine(Stateless.StateMachine<OrderStatus, string> machine)
+    {
+        machine.Configure(OrderStatus.Draft)
+            .Permit(Triggers.Submit, OrderStatus.Submitted)
+            .Permit(Triggers.Cancel, OrderStatus.Cancelled);
+
+        machine.Configure(OrderStatus.Submitted)
+            .Permit(Triggers.Approve, OrderStatus.Approved)
+            .Permit(Triggers.Cancel, OrderStatus.Cancelled);
+
+        machine.Configure(OrderStatus.Approved)
+            .Permit(Triggers.Ship, OrderStatus.Shipped)
+            .Permit(Triggers.Cancel, OrderStatus.Cancelled);
+
+        machine.Configure(OrderStatus.Shipped)
+            .Permit(Triggers.Deliver, OrderStatus.Delivered);
+
+        machine.Configure(OrderStatus.Delivered);
+
+        machine.Configure(OrderStatus.Cancelled);
     }
 }

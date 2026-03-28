@@ -2,83 +2,67 @@ namespace OrderManagement.Api.v2026_11_12.Controllers;
 
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
-using OrderManagement.Api.v2026_11_12.Models;
-using OrderManagement.Application.Commands;
-using OrderManagement.Domain;
 using ServiceLevelIndicators;
+using OrderManagement.Api.v2026_11_12.Models;
+using OrderManagement.Application.Customers;
+using OrderManagement.Application.Orders;
+using OrderManagement.Domain;
 using Trellis.Asp;
 using Trellis.Primitives;
 
 /// <summary>
-/// Customers management controller.
+/// Customers controller.
 /// </summary>
 [ApiController]
 [Consumes("application/json")]
 [Produces("application/json")]
 [Route("api/[controller]")]
-public class CustomersController(ISender sender) : ControllerBase
+public class CustomersController : ControllerBase
 {
-    /// <summary>
-    /// Create a new customer.
-    /// </summary>
+    private readonly ISender _sender;
+
+    /// <summary>Constructor.</summary>
+    public CustomersController(ISender sender) => _sender = sender;
+
+    /// <summary>Create a new customer.</summary>
     [HttpPost]
-    [ProducesResponseType(typeof(CustomerDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult<CustomerDto>> CreateCustomer(
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async ValueTask<ActionResult<CustomerResponse>> Create(
         [FromBody] CreateCustomerRequest request,
-        CancellationToken cancellationToken)
-    {
-        var firstNameResult = FirstName.TryCreate(request.FirstName);
-        var lastNameResult = LastName.TryCreate(request.LastName);
-        var emailResult = EmailAddress.TryCreate(request.Email);
-        var shippingAddressResult = ShippingAddress.TryCreate(
-            request.Street, request.City, request.State, request.PostalCode, request.Country);
+        CancellationToken cancellationToken) =>
+        await ShippingAddress.TryCreate(
+                request.ShippingAddress?.Street,
+                request.ShippingAddress?.City,
+                request.ShippingAddress?.State,
+                request.ShippingAddress?.PostalCode,
+                request.ShippingAddress?.Country)
+            .Map(address => new CreateCustomerCommand(
+                request.FirstName, request.LastName, request.Email, request.PhoneNumber, address))
+            .BindAsync(command => _sender.Send(command, cancellationToken))
+            .ToCreatedAtActionResultAsync(this, nameof(GetById), c => new { id = (Guid)c.Id }, CustomerResponse.From);
 
-        var combined = firstNameResult
-            .Combine(lastNameResult)
-            .Combine(emailResult)
-            .Combine(shippingAddressResult);
-
-        if (!combined.TryGetValue(out var values))
-            return combined.Error.ToActionResult<CustomerDto>(this);
-
-        var (firstName, lastName, email, address) = values;
-
-        Maybe<PhoneNumber> phone = Maybe<PhoneNumber>.None;
-        if (!string.IsNullOrEmpty(request.PhoneNumber))
-        {
-            var phoneResult = PhoneNumber.TryCreate(request.PhoneNumber);
-            if (!phoneResult.TryGetValue(out var p))
-                return phoneResult.Error.ToActionResult<CustomerDto>(this);
-            phone = p;
-        }
-
-        var command = new CreateCustomerCommand(firstName, lastName, email, phone, address);
-        return await sender.Send(command, cancellationToken)
-            .MapAsync(MapToDto)
-            .ToCreatedAtActionResultAsync(this, nameof(GetCustomer), dto => new { id = dto.Id });
-    }
-
-    /// <summary>
-    /// Get a customer by ID.
-    /// </summary>
+    /// <summary>Get a customer by ID.</summary>
     [HttpGet("{id}")]
-    [ProducesResponseType(typeof(CustomerDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<CustomerDto> GetCustomer(Guid id) =>
-        NotFound(new { error = $"Customer '{id}' not found" });
+    public async ValueTask<ActionResult<CustomerResponse>> GetById(
+        [CustomerResourceId] CustomerId id,
+        CancellationToken cancellationToken) =>
+        await _sender.Send(new GetCustomerByIdQuery(id), cancellationToken)
+            .ToActionResultAsync(this, CustomerResponse.From);
 
-    private static CustomerDto MapToDto(Customer c) => new(
-        c.Id.Value,
-        c.FirstName.Value,
-        c.LastName.Value,
-        c.Email.Value,
-        c.PhoneNumber.HasValue ? c.PhoneNumber.Value.Value : null,
-        new ShippingAddressDto(
-            c.ShippingAddress.Street,
-            c.ShippingAddress.City,
-            c.ShippingAddress.State,
-            c.ShippingAddress.PostalCode,
-            c.ShippingAddress.Country));
+    /// <summary>List all orders for a customer.</summary>
+    [HttpGet("{id}/orders")]
+    [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async ValueTask<ActionResult<IReadOnlyList<OrderResponse>>> ListOrders(
+        [CustomerResourceId] CustomerId id,
+        CancellationToken cancellationToken) =>
+        await _sender.Send(new ListOrdersByCustomerQuery(id), cancellationToken)
+            .ToActionResultAsync(this, orders => (IReadOnlyList<OrderResponse>)orders.Select(OrderResponse.From).ToList());
 }

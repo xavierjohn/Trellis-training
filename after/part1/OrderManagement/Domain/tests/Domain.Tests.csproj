@@ -2,8 +2,4 @@
   <ItemGroup>
     <ProjectReference Include="..\src\Domain.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <Using Include="OrderManagement.Domain" />
-    <Using Include="Trellis.Primitives" />
-  </ItemGroup>
 </Project>

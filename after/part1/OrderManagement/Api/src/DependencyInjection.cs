@@ -1,22 +1,19 @@
 ﻿namespace OrderManagement.Api;
 
-using OrderManagement.Api.Middleware;
+using Asp.Versioning.Conventions;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using ServiceLevelIndicators;
 using Scalar.AspNetCore;
+using ServiceLevelIndicators;
+using OrderManagement.Api.Middleware;
 using Trellis.Asp;
 using Trellis.Asp.Authorization;
-using Asp.Versioning.Conventions;
 
 internal static class DependencyInjection
 {
-    public static IServiceCollection AddPresentation(
-        this IServiceCollection services,
-        IHostEnvironment environment,
-        IConfiguration configuration)
+    public static IServiceCollection AddPresentation(this IServiceCollection services, IHostEnvironment environment)
     {
         services.ConfigureOpenTelemetry();
         services.ConfigureServiceLevelIndicators();
@@ -30,15 +27,11 @@ internal static class DependencyInjection
         services.AddHealthChecks();
 
         if (environment.IsDevelopment())
-        {
             services.AddDevelopmentActorProvider();
-        }
         else
-        {
-            services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme)
-                .AddJwtBearer(options => configuration.Bind("AzureAd", options));
-            services.AddEntraActorProvider();
-        }
+            throw new InvalidOperationException(
+                "Production IActorProvider not configured. " +
+                "Register AddEntraActorProvider() with your Azure Entra ID configuration for non-development environments.");
 
         return services;
     }
@@ -64,7 +57,6 @@ internal static class DependencyInjection
             .WithTracing(builder =>
             {
                 builder.AddAspNetCoreInstrumentation();
-                builder.AddResultsInstrumentation();
                 builder.AddPrimitiveValueObjectInstrumentation();
                 builder.AddOtlpExporter();
             });

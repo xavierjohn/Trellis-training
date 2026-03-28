@@ -1,51 +1,32 @@
-namespace OrderManagement.Domain.Events;
+namespace OrderManagement.Domain;
 
 using Trellis.Primitives;
 
+/// <summary>Raised when an order is submitted by the customer.</summary>
 public sealed record OrderSubmittedEvent(
     OrderId OrderId,
     CustomerId CustomerId,
     Money OrderTotal,
-    DateTime SubmittedAt) : IDomainEvent
-{
-    public DateTime OccurredAt { get; } = SubmittedAt;
-}
+    DateTime OccurredAt) : IDomainEvent;
 
+/// <summary>Raised when an order is approved by a warehouse manager.</summary>
 public sealed record OrderApprovedEvent(
     OrderId OrderId,
-    DateTime ApprovedAt) : IDomainEvent
-{
-    public DateTime OccurredAt { get; } = ApprovedAt;
-}
+    DateTime OccurredAt) : IDomainEvent;
 
+/// <summary>Raised when an order is shipped.</summary>
 public sealed record OrderShippedEvent(
     OrderId OrderId,
     CustomerId CustomerId,
-    DateTime ShippedAt) : IDomainEvent
-{
-    public DateTime OccurredAt { get; } = ShippedAt;
-}
+    DateTime OccurredAt) : IDomainEvent;
 
+/// <summary>Raised when an order is marked as delivered.</summary>
 public sealed record OrderDeliveredEvent(
     OrderId OrderId,
-    DateTime DeliveredAt) : IDomainEvent
-{
-    public DateTime OccurredAt { get; } = DeliveredAt;
-}
+    DateTime OccurredAt) : IDomainEvent;
 
+/// <summary>Raised when an order is cancelled.</summary>
 public sealed record OrderCancelledEvent(
     OrderId OrderId,
     OrderStatus CancelledFromStatus,
-    DateTime CancelledAt) : IDomainEvent
-{
-    public DateTime OccurredAt { get; } = CancelledAt;
-}
-
-public sealed record OrderReturnedEvent(
-    OrderId OrderId,
-    CustomerId CustomerId,
-    ReturnReason Reason,
-    DateTime ReturnedAt) : IDomainEvent
-{
-    public DateTime OccurredAt { get; } = ReturnedAt;
-}
+    DateTime OccurredAt) : IDomainEvent;
