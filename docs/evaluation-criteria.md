@@ -234,7 +234,7 @@ Level score = number of criteria in that level with consistency ≥ 7
 
 | Date | Trellis Version | AI Model | L1 (/20) | L2 (/15) | L3 (/16) | L4 (/9) | L5 (/4) | L6 (/10) | Total (/74) | Notes |
 |------|----------------|----------|----------|---------|----------|---------|---------|----------|-------------|-------|
-| 2026-03-28 | 3.0.0-alpha.137 | Claude Opus 4.6 | — | — | — | — | 4/4 | — | — | 81 tests, 27 min, 5 FPs |
+| 2026-03-28 | 3.0.0-alpha.137 | Claude Opus 4.6 | — | — | — | — | 4/4 | — | — | 81 tests, 27 min, 4 FPs |
 | 2026-03-28 | 3.0.0-alpha.137 | GPT-5.4 | — | — | — | — | 4/4 | — | — | 81 tests, 42 min, 4 FPs |
 | 2026-03-28 | 3.0.0-alpha.137 | Claude Sonnet 4.6 | — | — | — | — | 4/4 | — | — | 78 tests, 83 min, 5 pain points |
 
@@ -245,7 +245,6 @@ Level score = number of criteria in that level with consistency ≥ 7
 
 | Issue | Models Hit | Priority |
 |-------|-----------|----------|
-| Composite ValueObject EF Core mapping (ShippingAddress OwnsOne/OwnsMany) | Opus, GPT-5.4 | Document OwnsOne/OwnsMany pattern with parameterless ctor |
 | Money in request DTOs — need MoneyDto pattern | GPT-5.4, Sonnet | Document MoneyDto pattern in copilot instructions |
 | TRLS001 `_ = result` workaround not obvious | Opus, Sonnet | Document in copilot instructions for test code |
 | `[CustomerResourceId]` attribute undiscoverable | Sonnet | Document or replace with `[FromRoute]` |

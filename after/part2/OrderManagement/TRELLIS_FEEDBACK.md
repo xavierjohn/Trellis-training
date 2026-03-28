@@ -6,27 +6,11 @@
 
 ## Summary
 
-Building the Order Management System with Trellis was efficient overall. The framework's source generators, value objects, and Result<T> pattern provided strong guardrails. A few friction points arose around composite ValueObject equality, Maybe<T> property access in specifications, and the imperative workarounds needed for Result monadic composition.
+Building the Order Management System with Trellis was efficient overall. The framework's source generators, value objects, and Result<T> pattern provided strong guardrails. A few friction points arose around Maybe<T> property access in specifications and the imperative workarounds needed for Result monadic composition.
 
 ## Friction Points
 
-### FP-1: RequiredString<T> does not implement IComparable — composite ValueObject equality breaks
-- **Category:** Workaround Required
-- **Severity:** Medium (slowed progress)
-- **Context:** Creating a composite `ShippingAddress : ValueObject` with `GetEqualityComponents()` that yields `Street`, `City`, `State`, `PostalCode`, `Country` (all `RequiredString<T>` types).
-- **What happened:** Casting `RequiredString<T>` to `IComparable` throws `InvalidCastException` at runtime. The `GetEqualityComponents()` signature requires `IEnumerable<IComparable?>`, but `RequiredString<T>` does not implement `IComparable`.
-- **Workaround used:** Yielded the underlying `.Value` (string) instead:
-  ```csharp
-  protected override IEnumerable<IComparable?> GetEqualityComponents()
-  {
-      yield return Street.Value;
-      yield return City.Value;
-      // ...
-  }
-  ```
-- **Suggested improvement:** Either have `RequiredString<T>` implement `IComparable` or provide clear documentation/example for composite ValueObjects that contain Trellis value object properties.
-
-### FP-2: TRLS006 treats Maybe<T>.Value access as error in specification expressions
+### FP-1: TRLS006 treats Maybe<T>.Value access as error in specification expressions
 - **Category:** Workaround Required
 - **Severity:** Medium (slowed progress)
 - **Context:** Writing `OverdueOrderSpecification` that checks `order.SubmittedAt.Value < cutoff` where `SubmittedAt` is `Maybe<DateTime>`.
@@ -37,7 +21,7 @@ Building the Order Management System with Trellis was efficient overall. The fra
   ```
 - **Suggested improvement:** Either make TRLS006 flow-sensitive (recognize `.HasValue` guard) or provide a `Maybe<T>.Match()` or `Maybe<T>.Map()` that is analyzer-friendly for specification expressions.
 
-### FP-3: Result monadic composition (ParallelAsync, BindAsync) is difficult to use correctly
+### FP-2: Result monadic composition (ParallelAsync, BindAsync) is difficult to use correctly
 - **Category:** Ambiguous API
 - **Severity:** Medium (slowed progress)
 - **Context:** In `CreateDraftOrderCommand` handler, trying to fetch Customer and Products in parallel using `Result.ParallelAsync`, then compose results with `BindAsync`.
@@ -45,7 +29,7 @@ Building the Order Management System with Trellis was efficient overall. The fra
 - **Workaround used:** Rewrote to imperative style with early `if (!result.IsSuccess)` returns instead of fluent chaining.
 - **Suggested improvement:** Provide clearer documentation or examples for common composition patterns. Consider providing a `Result.All(task1, task2)` overload that accepts `Task<Result<T>>` directly.
 
-### FP-4: TRLS001 requires discarding Results even in fire-and-forget scenarios
+### FP-3: TRLS001 requires discarding Results even in fire-and-forget scenarios
 - **Category:** Minor Inconvenience
 - **Severity:** Low (minor inconvenience)
 - **Context:** In `CancelOrderCommand` handler, calling `product.ReleaseStock()` and `repo.SaveAsync()` where the result is intentionally not needed (best-effort stock release during cancellation).
@@ -53,7 +37,7 @@ Building the Order Management System with Trellis was efficient overall. The fra
 - **Workaround used:** `_ = product.ReleaseStock(...)` and `_ = await repo.SaveAsync(...)`.
 - **Suggested improvement:** This is arguably correct behavior. Perhaps document a pattern for fire-and-forget Result operations, or provide a `.Forget()` extension.
 
-### FP-5: LineItem entity constructor visibility
+### FP-4: LineItem entity constructor visibility
 - **Category:** Workaround Required
 - **Severity:** Low (minor inconvenience)
 - **Context:** Application layer handler needed to create `LineItem` instances, but the Trellis entity generator made the constructor `internal`.
@@ -76,20 +60,7 @@ Building the Order Management System with Trellis was efficient overall. The fra
 
 ## Suggested New Features
 
-### SF-1: Composite ValueObject source generator
-- **Use case:** When creating composite value objects like ShippingAddress that contain multiple Trellis value object properties.
-- **Proposed API:**
-  ```csharp
-  [CompositeValueObject]
-  public partial class ShippingAddress
-  {
-      public Street Street { get; }
-      public City City { get; }
-      // GetEqualityComponents() auto-generated
-  }
-  ```
-
-### SF-2: Result.AllAsync helper for parallel fetch patterns
+### SF-1: Result.AllAsync helper for parallel fetch patterns
 - **Use case:** Common pattern of fetching multiple entities in parallel and failing fast if any is not found.
 - **Proposed API:**
   ```csharp
@@ -100,7 +71,6 @@ Building the Order Management System with Trellis was efficient overall. The fra
 
 ## Copilot Instructions Feedback
 
-- The instructions on composite ValueObjects (`GetEqualityComponents`) should note that Trellis value object types don't implement `IComparable` and that `.Value` should be yielded instead of the wrapper type.
 - The `Result.ParallelAsync` section could benefit from a concrete example showing the correct async lambda syntax, as the signature is tricky to get right.
 - The `Maybe<T>` section should document the `GetValueOrDefault()` workaround for TRLS006 in specification expressions.
 - The guidance on when to use `LazyStateMachine` vs `StateMachine` was clear and saved debugging time — good documentation.
