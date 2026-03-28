@@ -1,13 +1,12 @@
 namespace OrderManagement.AntiCorruptionLayer;
 
-using Microsoft.EntityFrameworkCore;
 using OrderManagement.Application.Orders;
 using OrderManagement.Domain;
 using Trellis.Authorization;
 using Trellis.EntityFrameworkCore;
 
 /// <summary>
-/// Resource loader for <see cref="CancelOrderCommand"/> — loads <see cref="Order"/> by ID for resource-based authorization.
+/// Resource loader for CancelOrderCommand — loads Order by ID for ownership authorization.
 /// </summary>
 internal class CancelOrderResourceLoader : ResourceLoaderById<CancelOrderCommand, Order, OrderId>
 {
@@ -19,10 +18,9 @@ internal class CancelOrderResourceLoader : ResourceLoaderById<CancelOrderCommand
 
     protected override async Task<Result<Order>> GetByIdAsync(OrderId id, CancellationToken cancellationToken) =>
         await _context.Orders
-            .Include(o => o.LineItems)
             .Where(o => o.Id == id)
             .FirstOrDefaultResultAsync(
-                Error.NotFound($"Order {id.Value} not found.", "orderId"),
+                Error.NotFound($"Order {id.Value} not found."),
                 cancellationToken)
             .ConfigureAwait(false);
 }

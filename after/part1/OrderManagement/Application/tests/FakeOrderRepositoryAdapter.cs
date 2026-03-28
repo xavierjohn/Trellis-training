@@ -1,6 +1,6 @@
 namespace Application.Tests;
 
-using OrderManagement.Application;
+using OrderManagement.Application.Orders;
 using OrderManagement.Domain;
 using Trellis.Testing.Fakes;
 
@@ -16,21 +16,22 @@ internal class FakeOrderRepositoryAdapter : IOrderRepository
         return result.IsSuccess ? Maybe.From(result.Value) : Maybe<Order>.None;
     }
 
-    public Task<IReadOnlyList<Order>> FindByCustomerIdAsync(CustomerId customerId, CancellationToken cancellationToken)
-    {
-        var items = _repo.GetAll().Where(o => o.CustomerId == customerId).ToList();
-        return Task.FromResult<IReadOnlyList<Order>>(items);
-    }
-
-    public Task<IReadOnlyList<Order>> FindAllAsync(Specification<Order> specification, CancellationToken cancellationToken)
-    {
-        var items = _repo.GetAll().Where(specification.IsSatisfiedBy).ToList();
-        return Task.FromResult<IReadOnlyList<Order>>(items);
-    }
-
     public async Task<Result<Unit>> SaveAsync(Order order, CancellationToken cancellationToken)
     {
         var result = await _repo.SaveAsync(order, cancellationToken);
         return result.Map(_ => default(Unit));
+    }
+
+    public Task<IReadOnlyList<Order>> GetByCustomerIdAsync(CustomerId customerId, CancellationToken cancellationToken)
+    {
+        var orders = _repo.GetAll().Where(o => o.CustomerId == customerId).ToList();
+        return Task.FromResult<IReadOnlyList<Order>>(orders);
+    }
+
+    public Task<IReadOnlyList<Order>> GetOverdueOrdersAsync(DateTime utcNow, CancellationToken cancellationToken)
+    {
+        var spec = new OverdueOrderSpecification(utcNow);
+        var orders = _repo.GetAll().Where(spec.IsSatisfiedBy).ToList();
+        return Task.FromResult<IReadOnlyList<Order>>(orders);
     }
 }

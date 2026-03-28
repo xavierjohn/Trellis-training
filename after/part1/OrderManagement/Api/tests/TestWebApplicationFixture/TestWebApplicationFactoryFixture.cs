@@ -40,7 +40,6 @@ public class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>, 
                 options.UseSqlite(_connection)
                        .AddTrellisInterceptors());
         });
-
     }
 
     protected override void Dispose(bool disposing)

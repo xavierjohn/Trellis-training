@@ -1,4 +1,4 @@
-namespace Application.Tests;
+﻿namespace Application.Tests;
 
 using Microsoft.Extensions.Hosting;
 using OrderManagement.Application;
@@ -10,6 +10,6 @@ public class Startup
             .ConfigureServices((context, services) =>
             {
                 services.AddApplication()
-                        .AddMockDependencies();
+                .AddMockDependencies();
             });
 }

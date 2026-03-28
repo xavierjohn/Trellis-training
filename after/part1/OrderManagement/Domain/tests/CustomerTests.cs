@@ -1,64 +1,40 @@
+#pragma warning disable TRLS001, TRLS003
+
 namespace Domain.Tests;
 
 using OrderManagement.Domain;
 using Trellis.Primitives;
-
-#pragma warning disable TRLS003 // Tests assert success before accessing .Value
+using Trellis.Testing;
 
 public class CustomerTests
 {
-    private static CustomerFirstName TestFirstName => CustomerFirstName.Create("Jane");
-    private static CustomerLastName TestLastName => CustomerLastName.Create("Smith");
-    private static EmailAddress TestEmail => EmailAddress.Create("jane.smith@example.com");
-    private static ShippingAddress TestAddress =>
-        ShippingAddress.TryCreate("1 Oak Ave", "Portland", "OR", "97201", "US").Value;
+    private static FirstName ValidFirstName => FirstName.Create("John");
+    private static LastName ValidLastName => LastName.Create("Doe");
+    private static EmailAddress ValidEmail => EmailAddress.Create("john@example.com");
+    private static PhoneNumber ValidPhone => PhoneNumber.Create("+12025551234");
+    private static ShippingAddress ValidAddress => ShippingAddress.TryCreate(
+        Street.Create("123 Main St"), City.Create("Springfield"),
+        State.Create("IL"), PostalCode.Create("62701"), Country.Create("USA")).Value;
 
     [Fact]
-    public void TryCreate_with_all_required_fields_succeeds()
+    public void TryCreate_ValidWithPhone_ReturnsSuccess()
     {
-        var result = Customer.TryCreate(TestFirstName, TestLastName, TestEmail, Maybe<PhoneNumber>.None, TestAddress);
+        var result = Customer.TryCreate(ValidFirstName, ValidLastName, ValidEmail, ValidPhone, ValidAddress);
 
         result.Should().BeSuccess();
-        var customer = result.Value;
-        customer.FirstName.Should().Be(TestFirstName);
-        customer.LastName.Should().Be(TestLastName);
-        customer.Email.Should().Be(TestEmail);
-        customer.PhoneNumber.Should().BeNone();
+        result.Value.FirstName.Should().Be(ValidFirstName);
+        result.Value.LastName.Should().Be(ValidLastName);
+        result.Value.Email.Should().Be(ValidEmail);
+        result.Value.PhoneNumber.Should().HaveValue();
+        result.Value.ShippingAddress.Should().Be(ValidAddress);
     }
 
     [Fact]
-    public void TryCreate_with_phone_number_preserves_phone()
+    public void TryCreate_ValidWithoutPhone_ReturnsSuccess()
     {
-        var phone = PhoneNumber.Create("+15035550101");
-
-        var result = Customer.TryCreate(TestFirstName, TestLastName, TestEmail, Maybe.From(phone), TestAddress);
-
-        result.Should().BeSuccess();
-        result.Value.PhoneNumber.Should().HaveValueEqualTo(phone);
-    }
-
-    [Fact]
-    public void TryCreate_without_phone_number_has_none()
-    {
-        var result = Customer.TryCreate(TestFirstName, TestLastName, TestEmail, Maybe<PhoneNumber>.None, TestAddress);
+        var result = Customer.TryCreate(ValidFirstName, ValidLastName, ValidEmail, Maybe<PhoneNumber>.None, ValidAddress);
 
         result.Should().BeSuccess();
         result.Value.PhoneNumber.Should().BeNone();
-    }
-
-    [Fact]
-    public void CustomerFirstName_blank_fails_validation()
-    {
-        var result = CustomerFirstName.TryCreate("");
-
-        result.Should().BeFailure();
-    }
-
-    [Fact]
-    public void EmailAddress_invalid_format_fails_validation()
-    {
-        var result = EmailAddress.TryCreate("not-a-valid-email");
-
-        result.Should().BeFailure();
     }
 }

@@ -4,22 +4,23 @@ using Mediator;
 using OrderManagement.Domain;
 using Trellis.Authorization;
 
-/// <summary>Gets a customer by ID.</summary>
+/// <summary>
+/// Gets a customer by ID.
+/// </summary>
 public sealed record GetCustomerByIdQuery(CustomerId CustomerId) : IQuery<Result<Customer>>, IAuthorize
 {
-    /// <inheritdoc />
     public IReadOnlyList<string> RequiredPermissions { get; } = [Permissions.CustomersRead];
 }
 
-/// <summary>Handler for <see cref="GetCustomerByIdQuery"/>.</summary>
+/// <summary>
+/// Handler for GetCustomerByIdQuery.
+/// </summary>
 public sealed class GetCustomerByIdQueryHandler : IQueryHandler<GetCustomerByIdQuery, Result<Customer>>
 {
     private readonly ICustomerRepository _repository;
 
-    /// <summary>Initializes a new instance of <see cref="GetCustomerByIdQueryHandler"/>.</summary>
     public GetCustomerByIdQueryHandler(ICustomerRepository repository) => _repository = repository;
 
-    /// <inheritdoc />
     public async ValueTask<Result<Customer>> Handle(GetCustomerByIdQuery query, CancellationToken cancellationToken) =>
         (await _repository.FindByIdAsync(query.CustomerId, cancellationToken))
             .ToResult(Error.NotFound($"Customer {query.CustomerId} not found."));

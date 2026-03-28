@@ -1,7 +1,9 @@
 namespace OrderManagement.Domain;
 
-/// <summary>Non-negative quantity of stock on hand for a product.</summary>
-[Range(0, 1_000_000)]
+/// <summary>
+/// Current stock quantity of a product. Non-negative integer.
+/// </summary>
+[Range(0, int.MaxValue)]
 public partial class StockQuantity : RequiredInt<StockQuantity>
 {
 }

@@ -5,28 +5,23 @@ using OrderManagement.Domain;
 using Trellis.Authorization;
 
 /// <summary>
-/// Lists all orders that are overdue: in Submitted status for more than 7 days without approval.
+/// Lists overdue orders (submitted more than 7 days ago without being approved).
 /// </summary>
 public sealed record ListOverdueOrdersQuery : IQuery<Result<IReadOnlyList<Order>>>, IAuthorize
 {
-    /// <inheritdoc />
     public IReadOnlyList<string> RequiredPermissions { get; } = [Permissions.OrdersReadAll];
 }
 
-/// <summary>Handler for <see cref="ListOverdueOrdersQuery"/>.</summary>
-public sealed class ListOverdueOrdersQueryHandler
-    : IQueryHandler<ListOverdueOrdersQuery, Result<IReadOnlyList<Order>>>
+/// <summary>
+/// Handler for ListOverdueOrdersQuery.
+/// </summary>
+public sealed class ListOverdueOrdersQueryHandler : IQueryHandler<ListOverdueOrdersQuery, Result<IReadOnlyList<Order>>>
 {
-    private readonly IOrderRepository _repository;
+    private readonly IOrderRepository _orderRepository;
 
-    /// <summary>Initializes a new instance of <see cref="ListOverdueOrdersQueryHandler"/>.</summary>
-    public ListOverdueOrdersQueryHandler(IOrderRepository repository) => _repository = repository;
+    public ListOverdueOrdersQueryHandler(IOrderRepository orderRepository) => _orderRepository = orderRepository;
 
-    /// <inheritdoc />
-    public async ValueTask<Result<IReadOnlyList<Order>>> Handle(
-        ListOverdueOrdersQuery query, CancellationToken cancellationToken) =>
-        Result.Success(
-            await _repository.FindAllAsync(
-                new OverdueOrderSpecification(DateTime.UtcNow.AddDays(-7)),
-                cancellationToken));
+    public async ValueTask<Result<IReadOnlyList<Order>>> Handle(ListOverdueOrdersQuery query, CancellationToken cancellationToken) =>
+        Result.Success<IReadOnlyList<Order>>(
+            await _orderRepository.GetOverdueOrdersAsync(DateTime.UtcNow, cancellationToken));
 }

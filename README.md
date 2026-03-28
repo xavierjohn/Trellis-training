@@ -6,7 +6,7 @@
 
 **Build enterprise services with AI — and measure consistency.**
 
-Give an AI model a business spec, a framework (Trellis), and a template. Let it implement the entire service in one shot. Then evaluate the output against 59 criteria across 5 levels of quality.
+Give an AI model a business spec, a framework (Trellis), and a template. Let it implement the entire service in one shot. Then evaluate the output against 74 criteria across 6 levels of quality.
 
 This isn't a tutorial — it's a **training lab** that doubles as an **AI consistency benchmark**.
 
@@ -24,7 +24,7 @@ An **Order Management Service** with:
 - **State machine** — Draft → Submitted → Approved → Shipped → Delivered (with Cancel from multiple states)
 - **Stock management** — reserve on submit, release on cancel
 - **Authorization** — permission-based + resource-based (ownership checks)
-- **11 commands/queries** — full CQRS with Mediator pipeline
+- **16 commands/queries** — full CQRS with Mediator pipeline
 - **Railway-Oriented Programming** — typed errors, no exceptions for control flow
 - **Value objects everywhere** — zero primitive obsession
 
@@ -39,11 +39,11 @@ The lab starts from a **scaffolded template** and ends with a **complete enterpr
 | | Before (Template) | After (AI-Generated) |
 |---|---|---|
 | **Projects** | 4-layer solution with sample code | Same structure, real domain |
-| **Domain** | WeatherForecast sample | 3 aggregates, 15+ value objects, state machine |
-| **Application** | Sample command/query | 11 commands/queries with authorization |
+| **Domain** | Todo sample | 3 aggregates, 15+ value objects, state machine |
+| **Application** | Sample command/query | 16 commands/queries with authorization |
 | **Acl** | Sample EF Core setup | 3 repositories, 4 entity configurations |
-| **API** | Sample controller | 3 controllers, 14+ endpoints, versioned |
-| **Tests** | 38 template tests | 60-150 tests (domain, application, integration) |
+| **API** | Sample controller | 3 controllers, 16 endpoints, versioned |
+| **Tests** | 95 template tests | 60-150 tests (domain, application, integration) |
 
 <p align="center">
   <img src="docs/images/before-after.png" alt="Before and After — Template scaffold vs completed Order Management service" width="700"/>
@@ -74,31 +74,33 @@ Browse the full source:
 
 ## Evaluation
 
-Every run is scored against **59 criteria** across 5 levels:
+Every run is scored against **74 criteria** across 6 levels:
 
 <p align="center">
-  <img src="docs/images/evaluation-radar.png" alt="Evaluation Radar — L1 Structural, L2 Behavioral, L3 Architecture, L4 Tests, L5 Feedback" width="500"/>
+  <img src="docs/images/evaluation-radar.png" alt="Evaluation Radar — L1 Structural, L2 Behavioral, L3 Architecture, L4 Tests, L5 Feedback, L6 Feature Addition" width="500"/>
 </p>
 
 | Level | What It Measures | Criteria |
 |-------|-----------------|----------|
-| **L1: Structural** | Are the right types, patterns, and building blocks present? | 18 |
-| **L2: Behavioral** | Does the business logic work correctly? | 13 |
-| **L3: Architecture** | Is the API, DI, and infrastructure correct? | 15 |
+| **L1: Structural** | Are the right types, patterns, and building blocks present? | 20 |
+| **L2: Behavioral** | Does the business logic work correctly? | 15 |
+| **L3: Architecture** | Is the API, DI, and infrastructure correct? | 16 |
 | **L4: Tests** | Are domain, integration, and auth tests comprehensive? | 9 |
 | **L5: Feedback** | Did the AI produce useful framework feedback? | 4 |
+| **L6: Feature Addition** | Can the AI modify patterns without regressions? | 10 |
 
-**Passing score: 53+/59**
+**Passing score: 68+/74**
 
 ### Results So Far
 
 | AI Model | Trellis | Score | Verdict |
 |----------|---------|-------|---------|
-| GPT-5.4 | alpha.127 | 58/58 (100%) | **PASS** |
-| Claude Sonnet 4.6 | alpha.127 | 58/58 (100%) | **PASS** |
-| Claude Opus 4.6 | alpha.127 | 57/58 (98%) | **PASS** |
+| Claude Opus 4.6 | alpha.137 | 81 tests (part 1), 92 tests (part 1 + 2) | **PASS** |
+| GPT-5.4 | alpha.137 | 81 tests (part 1), 102 tests (part 1 + 2) | **PASS** |
+| Claude Sonnet 4.6 | alpha.137 | 78 tests (part 1), 97 tests (part 1 + 2) | **PASS** |
 
-Full results: **[results/evaluation-results.md](results/evaluation-results.md)**
+Full results: **[results/evaluation-results.md](results/evaluation-results.md)** (historical alpha.127 scorecards)
+Tracking table: **[docs/evaluation-criteria.md](docs/evaluation-criteria.md)**
 
 ## Observability
 
@@ -153,14 +155,15 @@ dotnet new install Trellis.AspTemplate
 trellis-training/
 ├── README.md                          # This file
 ├── docs/
-│   ├── training-lab.md                # Step-by-step guide + evaluation criteria
+│   ├── training-lab.md                # Step-by-step guide (Steps 1-8)
+│   ├── evaluation-criteria.md         # Scoring rubric (74 criteria, 6 levels)
 │   └── images/                        # Visual assets (Open Art)
 │       ├── hero-banner.png            # Hero image
 │       ├── architecture-overview.png  # 4-layer architecture diagram
 │       ├── order-lifecycle.png        # State machine diagram
 │       ├── before-after.png           # Template vs completed comparison
 │       ├── step-flow.png              # Steps 1-8 flow visualization
-│       ├── evaluation-radar.png       # L1-L5 scoring radar chart
+│       ├── evaluation-radar.png       # L1-L6 scoring radar chart
 │       ├── aspire-dashboard.png       # Dashboard screenshot
 │       ├── scalar-api-docs.png        # Scalar API screenshot
 │       └── rop-pipeline.png           # ROP chain visualization
@@ -168,7 +171,7 @@ trellis-training/
 │   ├── order-management-sqlite.md    # Business spec — SQLite/EF Core
 │   └── order-management-cosmosdb.md  # Business spec — CosmosDB variant
 ├── results/
-│   ├── evaluation-results.md          # Detailed scorecards across runs
+│   ├── evaluation-results.md          # Detailed scorecards (historical, alpha.127)
 │   └── ai-mistakes-log.md            # Common mistake patterns
 ├── before/
 │   └── OrderManagement/              # Template scaffold (what you start with)

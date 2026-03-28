@@ -7,34 +7,60 @@ using OrderManagement.Domain;
 /// </summary>
 public record CustomerResponse
 {
-    /// <summary>Unique customer identifier.</summary>
+    /// <summary>Customer identifier.</summary>
     public Guid Id { get; init; }
+
     /// <summary>Customer first name.</summary>
     public string FirstName { get; init; } = null!;
+
     /// <summary>Customer last name.</summary>
     public string LastName { get; init; } = null!;
+
     /// <summary>Customer email address.</summary>
     public string Email { get; init; } = null!;
-    /// <summary>Optional phone number.</summary>
-    public string? PhoneNumber { get; init; }
-    /// <summary>Default shipping address.</summary>
-    public ShippingAddressDto ShippingAddress { get; init; } = null!;
 
-    /// <summary>Maps from domain aggregate.</summary>
-    public static CustomerResponse From(Customer c) => new()
+    /// <summary>Customer phone number, if provided.</summary>
+    public string? PhoneNumber { get; init; }
+
+    /// <summary>Customer shipping address.</summary>
+    public ShippingAddressResponse ShippingAddress { get; init; } = null!;
+
+    /// <summary>Maps from domain model to response.</summary>
+    public static CustomerResponse From(Customer customer) => new()
     {
-        Id = c.Id.Value,
-        FirstName = c.FirstName.Value,
-        LastName = c.LastName.Value,
-        Email = c.Email.Value,
-        PhoneNumber = c.PhoneNumber.Match<string?>(p => p.Value, () => null),
-        ShippingAddress = new ShippingAddressDto
+        Id = customer.Id.Value,
+        FirstName = customer.FirstName.Value,
+        LastName = customer.LastName.Value,
+        Email = customer.Email.Value,
+        PhoneNumber = customer.PhoneNumber.Match<string?>(p => p.Value, () => null),
+        ShippingAddress = new ShippingAddressResponse
         {
-            Street = c.ShippingAddress.Street,
-            City = c.ShippingAddress.City,
-            State = c.ShippingAddress.State,
-            PostalCode = c.ShippingAddress.PostalCode,
-            Country = c.ShippingAddress.Country
+            Street = customer.ShippingAddress.Street.Value,
+            City = customer.ShippingAddress.City.Value,
+            State = customer.ShippingAddress.State.Value,
+            PostalCode = customer.ShippingAddress.PostalCode.Value,
+            Country = customer.ShippingAddress.Country.Value
         }
     };
+}
+
+/// <summary>
+/// Response model for a shipping address.
+/// </summary>
+public record ShippingAddressResponse
+{
+    /// <summary>Street address.</summary>
+    public string Street { get; init; } = null!;
+
+    /// <summary>City name.</summary>
+    public string City { get; init; } = null!;
+
+    /// <summary>State or province.</summary>
+    public string State { get; init; } = null!;
+
+    /// <summary>Postal or ZIP code.</summary>
+    public string PostalCode { get; init; } = null!;
+
+    /// <summary>Country name.</summary>
+    public string Country { get; init; } = null!;
 }

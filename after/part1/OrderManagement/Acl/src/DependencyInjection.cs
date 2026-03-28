@@ -2,7 +2,9 @@
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using OrderManagement.Application;
+using OrderManagement.Application.Customers;
+using OrderManagement.Application.Orders;
+using OrderManagement.Application.Products;
 using Trellis.EntityFrameworkCore;
 using Trellis.Mediator;
 
@@ -17,9 +19,8 @@ public static class DependencyInjection
         services.AddScoped<ICustomerRepository, CustomerRepository>();
         services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<IOrderRepository, OrderRepository>();
-
         services.AddResourceAuthorization(
-            typeof(Application.DependencyInjection).Assembly,
+            typeof(CancelOrderCommand).Assembly,
             typeof(CancelOrderResourceLoader).Assembly);
 
         return services;

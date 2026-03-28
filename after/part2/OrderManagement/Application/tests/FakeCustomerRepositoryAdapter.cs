@@ -1,6 +1,6 @@
 namespace Application.Tests;
 
-using OrderManagement.Application;
+using OrderManagement.Application.Customers;
 using OrderManagement.Domain;
 using Trellis.Testing.Fakes;
 
@@ -8,7 +8,11 @@ internal class FakeCustomerRepositoryAdapter : ICustomerRepository
 {
     private readonly FakeRepository<Customer, CustomerId> _repo;
 
-    public FakeCustomerRepositoryAdapter(FakeRepository<Customer, CustomerId> repo) => _repo = repo;
+    public FakeCustomerRepositoryAdapter(FakeRepository<Customer, CustomerId> repo)
+    {
+        _repo = repo;
+        _repo.WithUniqueConstraint(c => c.Email);
+    }
 
     public async Task<Maybe<Customer>> FindByIdAsync(CustomerId id, CancellationToken cancellationToken)
     {

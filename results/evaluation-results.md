@@ -1,9 +1,11 @@
-# Trellis AI Evaluation Results
+# Trellis AI Evaluation Results (Historical — alpha.127)
+
+> **⚠️ These results are from an earlier evaluation run using Trellis 3.0.0-alpha.127 with 58 criteria across 5 levels. The current rubric has 74 criteria across 6 levels — see [`docs/evaluation-criteria.md`](../docs/evaluation-criteria.md) for the latest scoring framework and tracking table.**
 
 Tracks how well different AI models implement the Order Management spec using Trellis conventions.
 
 **Evaluation spec:** Order Management (see [`specs/order-management-sqlite.md`](../specs/order-management-sqlite.md))
-**Scoring framework:** 58 criteria across 5 levels (see [`docs/training-lab.md`](../docs/training-lab.md))
+**Scoring framework:** 58 criteria across 5 levels (historical — see [`docs/evaluation-criteria.md`](../docs/evaluation-criteria.md) for current)
 **Goal:** Total score of 52+/58
 **Trellis version:** 3.0.0-alpha.127
 **Template version:** Trellis.AspTemplate 1.0.6-alpha (NuGet.org)

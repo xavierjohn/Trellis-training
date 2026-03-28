@@ -19,15 +19,13 @@ internal class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 
         builder.HasIndex(c => c.Email).IsUnique();
 
-        // PhoneNumber is Maybe<PhoneNumber> — handled by ApplyTrellisConventions
-
         builder.OwnsOne(c => c.ShippingAddress, sa =>
         {
-            sa.Property(a => a.Street).HasColumnName("ShippingAddress_Street").IsRequired().HasMaxLength(500);
-            sa.Property(a => a.City).HasColumnName("ShippingAddress_City").IsRequired().HasMaxLength(200);
-            sa.Property(a => a.State).HasColumnName("ShippingAddress_State").IsRequired().HasMaxLength(200);
-            sa.Property(a => a.PostalCode).HasColumnName("ShippingAddress_PostalCode").IsRequired().HasMaxLength(20);
-            sa.Property(a => a.Country).HasColumnName("ShippingAddress_Country").IsRequired().HasMaxLength(200);
+            sa.Property(a => a.Street).IsRequired().HasColumnName("ShippingStreet");
+            sa.Property(a => a.City).IsRequired().HasColumnName("ShippingCity");
+            sa.Property(a => a.State).IsRequired().HasColumnName("ShippingState");
+            sa.Property(a => a.PostalCode).IsRequired().HasColumnName("ShippingPostalCode");
+            sa.Property(a => a.Country).IsRequired().HasColumnName("ShippingCountry");
         });
     }
 }

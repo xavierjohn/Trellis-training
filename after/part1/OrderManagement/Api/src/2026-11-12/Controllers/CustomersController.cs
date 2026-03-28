@@ -8,7 +8,6 @@ using OrderManagement.Application.Customers;
 using OrderManagement.Application.Orders;
 using OrderManagement.Domain;
 using Trellis.Asp;
-using Trellis.Primitives;
 
 /// <summary>
 /// Customers controller.
@@ -24,43 +23,53 @@ public class CustomersController : ControllerBase
     /// <summary>Constructor.</summary>
     public CustomersController(ISender sender) => _sender = sender;
 
-    /// <summary>Create a new customer.</summary>
+    /// <summary>
+    /// Create a new customer.
+    /// </summary>
     [HttpPost]
     [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async ValueTask<ActionResult<CustomerResponse>> Create(
+    public async ValueTask<ActionResult<CustomerResponse>> CreateCustomer(
         [FromBody] CreateCustomerRequest request,
-        CancellationToken cancellationToken) =>
-        await ShippingAddress.TryCreate(
-                request.ShippingAddress?.Street,
-                request.ShippingAddress?.City,
-                request.ShippingAddress?.State,
-                request.ShippingAddress?.PostalCode,
-                request.ShippingAddress?.Country)
-            .Map(address => new CreateCustomerCommand(
-                request.FirstName, request.LastName, request.Email, request.PhoneNumber, address))
-            .BindAsync(command => _sender.Send(command, cancellationToken))
-            .ToCreatedAtActionResultAsync(this, nameof(GetById), c => new { id = (Guid)c.Id }, CustomerResponse.From);
+        CancellationToken cancellationToken)
+    {
+        var addressResult = ShippingAddress.TryCreate(
+            request.ShippingAddress.Street,
+            request.ShippingAddress.City,
+            request.ShippingAddress.State,
+            request.ShippingAddress.PostalCode,
+            request.ShippingAddress.Country);
 
-    /// <summary>Get a customer by ID.</summary>
+        return await addressResult
+            .BindAsync(address => _sender.Send(
+                new CreateCustomerCommand(request.FirstName, request.LastName, request.Email, request.PhoneNumber, address),
+                cancellationToken))
+            .ToCreatedAtActionResultAsync(this, nameof(GetCustomer), c => new { id = (Guid)c.Id }, CustomerResponse.From);
+    }
+
+    /// <summary>
+    /// Get a customer by ID.
+    /// </summary>
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async ValueTask<ActionResult<CustomerResponse>> GetById(
+    public async ValueTask<ActionResult<CustomerResponse>> GetCustomer(
         [CustomerResourceId] CustomerId id,
         CancellationToken cancellationToken) =>
         await _sender.Send(new GetCustomerByIdQuery(id), cancellationToken)
             .ToActionResultAsync(this, CustomerResponse.From);
 
-    /// <summary>List all orders for a customer.</summary>
+    /// <summary>
+    /// List orders for a customer.
+    /// </summary>
     [HttpGet("{id}/orders")]
     [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async ValueTask<ActionResult<IReadOnlyList<OrderResponse>>> ListOrders(
+    public async ValueTask<ActionResult<IReadOnlyList<OrderResponse>>> GetCustomerOrders(
         [CustomerResourceId] CustomerId id,
         CancellationToken cancellationToken) =>
         await _sender.Send(new ListOrdersByCustomerQuery(id), cancellationToken)

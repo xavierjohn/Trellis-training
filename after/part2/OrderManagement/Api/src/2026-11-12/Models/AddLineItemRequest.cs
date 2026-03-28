@@ -7,8 +7,9 @@ using OrderManagement.Domain;
 /// </summary>
 public record AddLineItemRequest
 {
-    /// <summary>Product identifier.</summary>
+    /// <summary>Product identifier for the line item.</summary>
     public ProductId ProductId { get; init; } = null!;
-    /// <summary>Quantity to add (1–999).</summary>
+
+    /// <summary>Quantity of the product to add.</summary>
     public LineItemQuantity Quantity { get; init; } = null!;
 }

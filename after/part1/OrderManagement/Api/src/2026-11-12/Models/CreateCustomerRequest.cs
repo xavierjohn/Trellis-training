@@ -5,18 +5,42 @@ using Trellis.Primitives;
 
 /// <summary>
 /// Request model for creating a customer.
-/// Value object fields are deserialized directly via Trellis.Asp scalar value binders.
 /// </summary>
 public record CreateCustomerRequest
 {
     /// <summary>Customer first name.</summary>
-    public CustomerFirstName FirstName { get; init; } = null!;
+    public FirstName FirstName { get; init; } = null!;
+
     /// <summary>Customer last name.</summary>
-    public CustomerLastName LastName { get; init; } = null!;
+    public LastName LastName { get; init; } = null!;
+
     /// <summary>Customer email address.</summary>
     public EmailAddress Email { get; init; } = null!;
-    /// <summary>Optional phone number.</summary>
+
+    /// <summary>Customer phone number, if provided.</summary>
     public Maybe<PhoneNumber> PhoneNumber { get; init; }
-    /// <summary>Shipping address. All fields required.</summary>
-    public ShippingAddressDto ShippingAddress { get; init; } = null!;
+
+    /// <summary>Customer shipping address.</summary>
+    public ShippingAddressRequest ShippingAddress { get; init; } = null!;
+}
+
+/// <summary>
+/// Shipping address fields for the create customer request.
+/// </summary>
+public record ShippingAddressRequest
+{
+    /// <summary>Street address.</summary>
+    public Street Street { get; init; } = null!;
+
+    /// <summary>City name.</summary>
+    public City City { get; init; } = null!;
+
+    /// <summary>State or province.</summary>
+    public State State { get; init; } = null!;
+
+    /// <summary>Postal or ZIP code.</summary>
+    public PostalCode PostalCode { get; init; } = null!;
+
+    /// <summary>Country name.</summary>
+    public Country Country { get; init; } = null!;
 }

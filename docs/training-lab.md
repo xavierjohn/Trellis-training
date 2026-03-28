@@ -63,7 +63,7 @@ This creates the full solution structure including:
 - `.github/trellis-api-reference.md` — Complete Trellis API surface reference
 - All project files, build system (`Directory.Build.props`, `Directory.Packages.props`, `build/test.props`), and test infrastructure
 - `.gitignore` configured for .NET/Visual Studio
-- Working sample code (BestWeatherForecast) replaced with your service name
+- Working sample code (Todo) replaced with your service name
 
 3. Verify the template builds and tests pass:
 
@@ -72,7 +72,7 @@ dotnet build
 dotnet test
 ```
 
-All 38 template tests should pass before you proceed.
+All 95 template tests should pass before you proceed.
 
 4. Commit:
 
@@ -87,7 +87,7 @@ git commit -m "Scaffold with Trellis template"
 
 ## Step 4: Implement the Service
 
-Open Copilot Chat, paste the **entire contents** of `specs/order-management.md` as context, and follow it with this prompt:
+Open Copilot Chat, paste the **entire contents** of `specs/order-management-sqlite.md` as context, and follow it with this prompt:
 
 > Implement the Order Management service according to the spec above. Replace the existing sample code with the Order Management domain.
 
@@ -144,7 +144,7 @@ If any response is wrong, note it for evaluation but **do not fix it** during ev
 
 ## Step 6: Review and Commit
 
-1. Review all generated code against the evaluation criteria below.
+1. Review all generated code against the [evaluation criteria](evaluation-criteria.md).
 2. Note issues but **do not fix them** during eval runs — they become your scores.
 3. Commit:
 
@@ -297,7 +297,7 @@ To use this guide as a consistency eval for Trellis:
 
 1. **Start 10 fresh sessions** — new repo, new Copilot conversation each time.
 2. **Follow Steps 1–7 identically** in each session.
-3. **After each session,** score the output against the Evaluation Criteria below.
+3. **After each session,** score the output against the [Evaluation Criteria](evaluation-criteria.md).
 4. **Record scores** in the tracking table.
 5. **Identify lowest-scoring criteria** — these are gaps in Trellis or the Copilot Instructions.
 6. **Improve Trellis or the instructions** to address the gaps.

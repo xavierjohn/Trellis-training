@@ -1,6 +1,8 @@
 namespace OrderManagement.Domain;
 
-/// <summary>Quantity of a product in an order line item. Must be between 1 and 999.</summary>
+/// <summary>
+/// Quantity of a line item. Between 1 and 999 inclusive.
+/// </summary>
 [Range(1, 999)]
 public partial class LineItemQuantity : RequiredInt<LineItemQuantity>
 {

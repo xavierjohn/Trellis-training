@@ -1,12 +1,12 @@
 namespace OrderManagement.AntiCorruptionLayer;
 
 using Microsoft.EntityFrameworkCore;
-using OrderManagement.Application;
+using OrderManagement.Application.Orders;
 using OrderManagement.Domain;
 using Trellis.EntityFrameworkCore;
 
 /// <summary>
-/// EF Core implementation of <see cref="IOrderRepository"/>.
+/// EF Core implementation of IOrderRepository.
 /// </summary>
 internal class OrderRepository : IOrderRepository
 {
@@ -23,24 +23,6 @@ internal class OrderRepository : IOrderRepository
         return Maybe.From(entity);
     }
 
-    public async Task<IReadOnlyList<Order>> FindByCustomerIdAsync(CustomerId customerId, CancellationToken cancellationToken)
-    {
-        return await _context.Orders
-            .Include(o => o.LineItems)
-            .Where(o => o.CustomerId == customerId)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    public async Task<IReadOnlyList<Order>> FindAllAsync(Specification<Order> specification, CancellationToken cancellationToken)
-    {
-        return await _context.Orders
-            .Include(o => o.LineItems)
-            .Where(specification)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-    }
-
     public async Task<Result<Unit>> SaveAsync(Order order, CancellationToken cancellationToken)
     {
         var entry = _context.Entry(order);
@@ -48,5 +30,23 @@ internal class OrderRepository : IOrderRepository
             _context.Orders.Add(order);
 
         return await _context.SaveChangesResultUnitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<Order>> GetByCustomerIdAsync(CustomerId customerId, CancellationToken cancellationToken) =>
+        await _context.Orders
+            .Include(o => o.LineItems)
+            .Where(o => o.CustomerId == customerId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+    public async Task<IReadOnlyList<Order>> GetOverdueOrdersAsync(DateTime utcNow, CancellationToken cancellationToken)
+    {
+        var cutoff = utcNow.AddDays(-7);
+        return await _context.Orders
+            .Include(o => o.LineItems)
+            .Where(o => o.Status == OrderStatus.Submitted)
+            .WhereLessThan(o => o.SubmittedAt, cutoff)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
     }
 }

@@ -62,7 +62,7 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **Pipeline behaviors registered** | Mediator registered with pipeline behaviors from Trellis.Mediator | 10 = all correct, <7 = needs guidance |
 | **IActorProvider registered** | TestActorProvider registered, reads X-Test-Actor header | 10 = all correct, <7 = needs pattern |
 | **DI extension per layer** | Each layer has one DI extension method, wired in Program.cs | 10 = all match, <7 = template unclear |
-| **Endpoint paths match** | All 14 endpoints exist with correct HTTP methods and paths | 10 = exact match, <7 = spec needs detail |
+| **Endpoint paths match** | All 16 endpoints exist with correct HTTP methods and paths | 10 = exact match, <7 = spec needs detail |
 | **API versioning configured** | Asp.Versioning with namespace convention, versioned controller folders | 10 = all present, <7 = needs emphasis |
 | **Problem Details for errors** | Error responses follow RFC 9457 format | 10 = all use it, <7 = Trellis.Asp gap |
 | **201 for creation with Location** | POST /customers and POST /orders return 201 with Location header | 10 = all correct, <7 = needs pattern |
@@ -70,7 +70,7 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **DTOs in Api layer** | Request/Response types in versioned Models/ folder (e.g., `Api/src/{version}/Models/`), not domain types | 10 = all correct, <7 = needs example |
 | **EF Core entity configurations** | IEntityTypeConfiguration classes in Acl | 10 = all correct, <7 = needs guidance |
 | **EnsureCreated on startup** | Database created via `EnsureCreated()` in development mode, no EF Core migrations | 10 = all correct, <7 = needs instruction |
-| **api.http updated** | Template api.http replaced with requests covering all 14 endpoints, correct api-version, X-Test-Actor headers, happy path + error examples | 10 = all endpoints, <7 = still has scaffold defaults |
+| **api.http updated** | Template api.http replaced with requests covering all 16 endpoints, correct api-version, X-Test-Actor headers, happy path + error examples | 10 = all endpoints, <7 = still has scaffold defaults |
 | **api.http playback passes** | All api.http requests execute successfully against the running service: happy-path requests return expected status codes (201, 200), error-path requests return expected error codes (400, 409, 403, 404). No requests fail due to invalid test data (e.g., SKU format mismatches, wrong field names). | 10 = all pass, <7 = some requests fail |
 | **AddTrellisInterceptors** | `AddTrellisInterceptors()` called in DbContext options for natural VO LINQ support | 10 = all correct, <7 = needs guidance |
 
@@ -173,7 +173,7 @@ find . -path "*/tests/GlobalUsings.cs" | wc -l
 
 # L3: Controller action count
 grep -rE "\[Http(Get|Post|Delete)\]" Api/src/ --include="*.cs" | wc -l
-# Should be 14
+# Should be 16
 
 # L3: EnsureCreated used (no migrations)
 grep -r "EnsureCreated" Api/src/ --include="*.cs" | wc -l
@@ -224,17 +224,32 @@ Level score = number of criteria in that level with consistency ≥ 7
 |-------|---------------|-------------|
 | L1: Structural | 20 | 0–20 |
 | L2: Behavioral | 15 | 0–15 |
-| L3: Architecture & API | 13 | 0–13 |
+| L3: Architecture & API | 16 | 0–16 |
 | L4: Tests | 9 | 0–9 |
 | L5: Feedback | 4 | 0–4 |
 | L6: Feature Addition | 10 | 0–10 |
-| **Total** | **71** | **0–71** |
+| **Total** | **74** | **0–74** |
 
 ### Step 5: Record in Tracking Table
 
-| Date | Trellis Version | AI Model | L1 (/20) | L2 (/15) | L3 (/13) | L4 (/9) | L5 (/4) | L6 (/10) | Total (/71) | Notes |
+| Date | Trellis Version | AI Model | L1 (/20) | L2 (/15) | L3 (/16) | L4 (/9) | L5 (/4) | L6 (/10) | Total (/74) | Notes |
 |------|----------------|----------|----------|---------|----------|---------|---------|----------|-------------|-------|
-| | | | | | | | | | | |
+| 2026-03-28 | 3.0.0-alpha.137 | Claude Opus 4.6 | — | — | — | — | 4/4 | — | — | 81 tests, 27 min, 5 FPs |
+| 2026-03-28 | 3.0.0-alpha.137 | GPT-5.4 | — | — | — | — | 4/4 | — | — | 81 tests, 42 min, 4 FPs |
+| 2026-03-28 | 3.0.0-alpha.137 | Claude Sonnet 4.6 | — | — | — | — | 4/4 | — | — | 78 tests, 83 min, 5 pain points |
+
+> **Note:** L1–L4, L6 require 10 runs to score consistency. These 3 runs are a single-pass validation.
+> All 3 models: build 0 errors/0 warnings, all tests pass, feedback file generated.
+
+### Recurring Friction Points (across models)
+
+| Issue | Models Hit | Priority |
+|-------|-----------|----------|
+| Composite ValueObject EF Core mapping (ShippingAddress OwnsOne/OwnsMany) | Opus, GPT-5.4 | Document OwnsOne/OwnsMany pattern with parameterless ctor |
+| Money in request DTOs — need MoneyDto pattern | GPT-5.4, Sonnet | Document MoneyDto pattern in copilot instructions |
+| TRLS001 `_ = result` workaround not obvious | Opus, Sonnet | Document in copilot instructions for test code |
+| `[CustomerResourceId]` attribute undiscoverable | Sonnet | Document or replace with `[FromRoute]` |
+| RequiredEnum handled by ApplyTrellisConventions — no HasConversion needed | GPT-5.4 | Clarify in copilot instructions |
 
 ### Step 6: Identify What to Fix
 
@@ -250,7 +265,7 @@ Sort all criteria by consistency score, lowest first:
 
 ### The Goal
 
-**Total score of 65+ out of 71** — meaning at least 65 of the 71 criteria achieve 7+/10 consistency across independent AI runs.
+**Total score of 68+ out of 74** — meaning at least 68 of the 74 criteria achieve 7+/10 consistency across independent AI runs.
 
 The Level 6 criteria specifically measure whether the architecture and copilot instructions support **incremental change** — the most important real-world capability. A model that scores 61/61 on L1–L5 but can't modify the codebase without regressions isn't production-ready.
 

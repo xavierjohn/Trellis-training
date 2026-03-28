@@ -18,8 +18,5 @@ internal class ProductConfiguration : IEntityTypeConfiguration<Product>
         builder.Property(p => p.StockQuantity).IsRequired();
 
         builder.HasIndex(p => p.Sku).IsUnique();
-
-        // UnitPrice (Money) is automatically mapped by MoneyConvention via ApplyTrellisConventions.
-        // Columns: UnitPrice (decimal 18,3) and UnitPriceCurrency (nvarchar 3).
     }
 }

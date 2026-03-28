@@ -7,6 +7,6 @@ using OrderManagement.Domain;
 /// </summary>
 public record AddStockRequest
 {
-    /// <summary>Quantity to add. Must be positive.</summary>
+    /// <summary>Quantity of stock to add.</summary>
     public StockQuantity Quantity { get; init; } = null!;
 }

@@ -1,6 +1,8 @@
 namespace OrderManagement.Domain;
 
-/// <summary>Lifecycle status of an order.</summary>
+/// <summary>
+/// Represents the lifecycle state of an order.
+/// </summary>
 public enum OrderStatus
 {
     Draft,
@@ -8,5 +10,6 @@ public enum OrderStatus
     Approved,
     Shipped,
     Delivered,
-    Cancelled
+    Cancelled,
+    Returned
 }

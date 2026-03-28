@@ -7,7 +7,6 @@ using OrderManagement.Api.v2026_11_12.Models;
 using OrderManagement.Application.Products;
 using OrderManagement.Domain;
 using Trellis.Asp;
-using Trellis.Primitives;
 
 /// <summary>
 /// Products controller.
@@ -23,32 +22,38 @@ public class ProductsController : ControllerBase
     /// <summary>Constructor.</summary>
     public ProductsController(ISender sender) => _sender = sender;
 
-    /// <summary>Create a new product.</summary>
+    /// <summary>
+    /// Create a new product.
+    /// </summary>
     [HttpPost]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async ValueTask<ActionResult<ProductResponse>> Create(
+    public async ValueTask<ActionResult<ProductResponse>> CreateProduct(
         [FromBody] CreateProductRequest request,
         CancellationToken cancellationToken) =>
-        await Money.TryCreate(request.UnitPrice.Amount, request.UnitPrice.Currency, "unitPrice")
-            .Map(price => new CreateProductCommand(request.ProductName, request.Sku, price))
-            .BindAsync(command => _sender.Send(command, cancellationToken))
-            .ToCreatedAtActionResultAsync(this, nameof(GetById), p => new { id = (Guid)p.Id }, ProductResponse.From);
+        await _sender.Send(
+            new CreateProductCommand(request.ProductName, request.Sku, request.UnitPrice),
+            cancellationToken)
+            .ToCreatedAtActionResultAsync(this, nameof(GetProduct), p => new { id = (Guid)p.Id }, ProductResponse.From);
 
-    /// <summary>Get a product by ID.</summary>
+    /// <summary>
+    /// Get a product by ID.
+    /// </summary>
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async ValueTask<ActionResult<ProductResponse>> GetById(
+    public async ValueTask<ActionResult<ProductResponse>> GetProduct(
         [CustomerResourceId] ProductId id,
         CancellationToken cancellationToken) =>
         await _sender.Send(new GetProductByIdQuery(id), cancellationToken)
             .ToActionResultAsync(this, ProductResponse.From);
 
-    /// <summary>Add stock to a product.</summary>
+    /// <summary>
+    /// Add stock to a product.
+    /// </summary>
     [HttpPost("{id}/stock-additions")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

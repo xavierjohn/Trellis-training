@@ -1,12 +1,12 @@
 namespace OrderManagement.AntiCorruptionLayer;
 
 using Microsoft.EntityFrameworkCore;
-using OrderManagement.Application;
+using OrderManagement.Application.Products;
 using OrderManagement.Domain;
 using Trellis.EntityFrameworkCore;
 
 /// <summary>
-/// EF Core implementation of <see cref="IProductRepository"/>.
+/// EF Core implementation of IProductRepository.
 /// </summary>
 internal class ProductRepository : IProductRepository
 {
@@ -21,6 +21,12 @@ internal class ProductRepository : IProductRepository
             .ConfigureAwait(false);
         return Maybe.From(entity);
     }
+
+    public async Task<List<Product>> GetByIdsAsync(IReadOnlyList<ProductId> ids, CancellationToken cancellationToken) =>
+        await _context.Products
+            .Where(p => ids.Contains(p.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
 
     public async Task<Result<Unit>> SaveAsync(Product product, CancellationToken cancellationToken)
     {

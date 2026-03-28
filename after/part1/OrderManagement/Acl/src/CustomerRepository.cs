@@ -1,12 +1,12 @@
 namespace OrderManagement.AntiCorruptionLayer;
 
 using Microsoft.EntityFrameworkCore;
-using OrderManagement.Application;
+using OrderManagement.Application.Customers;
 using OrderManagement.Domain;
 using Trellis.EntityFrameworkCore;
 
 /// <summary>
-/// EF Core implementation of <see cref="ICustomerRepository"/>.
+/// EF Core implementation of ICustomerRepository.
 /// </summary>
 internal class CustomerRepository : ICustomerRepository
 {
