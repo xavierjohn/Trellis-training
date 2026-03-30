@@ -1,13 +1,9 @@
 namespace OrderManagement.Application.Orders;
 
 using Mediator;
-using OrderManagement.Application.Products;
 using OrderManagement.Domain;
 using Trellis.Authorization;
 
-/// <summary>
-/// Cancels an order. Includes ownership check.
-/// </summary>
 public sealed record CancelOrderCommand(OrderId OrderId) : ICommand<Result<Order>>, IAuthorize, IAuthorizeResource<Order>
 {
     public IReadOnlyList<string> RequiredPermissions { get; } = [Permissions.OrdersCancel];
@@ -18,9 +14,6 @@ public sealed record CancelOrderCommand(OrderId OrderId) : ICommand<Result<Order
             Error.Forbidden("Only the order creator or an admin can cancel this order."));
 }
 
-/// <summary>
-/// Handler for CancelOrderCommand.
-/// </summary>
 public sealed class CancelOrderCommandHandler : ICommandHandler<CancelOrderCommand, Result<Order>>
 {
     private readonly IOrderRepository _orderRepository;
@@ -34,35 +27,39 @@ public sealed class CancelOrderCommandHandler : ICommandHandler<CancelOrderComma
 
     public async ValueTask<Result<Order>> Handle(CancelOrderCommand command, CancellationToken cancellationToken)
     {
-        var orderMaybe = await _orderRepository.FindByIdAsync(command.OrderId, cancellationToken);
-        var orderResult = orderMaybe.ToResult(Error.NotFound($"Order {command.OrderId} not found."));
-        if (orderResult.IsFailure) return orderResult;
+        var orderResult = (await _orderRepository.FindByIdAsync(command.OrderId, cancellationToken))
+            .ToResult(Error.NotFound($"Order {command.OrderId.Value} not found."));
+        if (orderResult.IsFailure)
+            return orderResult.Error;
 
         var order = orderResult.Value;
-        var previousStatus = order.Status;
+        List<Product>? products = null;
 
-        var cancelResult = order.Cancel();
-        if (cancelResult.IsFailure) return cancelResult;
-
-        // Release stock if order was Submitted or Approved
-        if (previousStatus is OrderStatus.Submitted or OrderStatus.Approved)
+        // Load products if stock release is needed
+        if (order.Status is OrderStatus.Submitted or OrderStatus.Approved)
         {
             var productIds = order.LineItems.Select(li => li.ProductId).ToList();
-            var products = await _productRepository.GetByIdsAsync(productIds, cancellationToken);
+            products = await _productRepository.GetByIdsAsync(productIds, cancellationToken);
+        }
 
-            foreach (var lineItem in order.LineItems)
+        var cancelResult = order.Cancel(products);
+        if (cancelResult.IsFailure)
+            return cancelResult.Error;
+
+        // Save products if stock was released
+        if (products is not null)
+        {
+            foreach (var product in products)
             {
-                var product = products.FirstOrDefault(p => p.Id == lineItem.ProductId);
-                if (product is not null)
-                {
-                    _ = product.ReleaseStock(lineItem.Quantity);
-                    _ = await _productRepository.SaveAsync(product, cancellationToken);
-                }
+                var saveResult = await _productRepository.SaveAsync(product, cancellationToken);
+                if (saveResult.IsFailure)
+                    return saveResult.Error;
             }
         }
 
-        var saveResult = await _orderRepository.SaveAsync(order, cancellationToken);
-        if (saveResult.IsFailure) return saveResult.Error;
+        var orderSaveResult = await _orderRepository.SaveAsync(order, cancellationToken);
+        if (orderSaveResult.IsFailure)
+            return orderSaveResult.Error;
 
         return order;
     }

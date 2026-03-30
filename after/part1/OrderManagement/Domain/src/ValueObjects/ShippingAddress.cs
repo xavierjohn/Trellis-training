@@ -1,7 +1,7 @@
 namespace OrderManagement.Domain;
 
 /// <summary>
-/// Shipping address value object with street, city, state, postal code, and country.
+/// A composite value object representing a shipping address.
 /// </summary>
 public class ShippingAddress : ValueObject
 {
@@ -10,6 +10,15 @@ public class ShippingAddress : ValueObject
     public State State { get; }
     public PostalCode PostalCode { get; }
     public Country Country { get; }
+
+    private ShippingAddress() // EF Core
+    {
+        Street = null!;
+        City = null!;
+        State = null!;
+        PostalCode = null!;
+        Country = null!;
+    }
 
     private ShippingAddress(Street street, City city, State state, PostalCode postalCode, Country country)
     {
@@ -20,26 +29,15 @@ public class ShippingAddress : ValueObject
         Country = country;
     }
 
-    public static Result<ShippingAddress> TryCreate(
-        Street street, City city, State state, PostalCode postalCode, Country country) =>
+    public static Result<ShippingAddress> TryCreate(Street street, City city, State state, PostalCode postalCode, Country country) =>
         new ShippingAddress(street, city, state, postalCode, country);
-
-    /// <summary>EF Core constructor.</summary>
-    private ShippingAddress()
-    {
-        Street = null!;
-        City = null!;
-        State = null!;
-        PostalCode = null!;
-        Country = null!;
-    }
 
     protected override IEnumerable<IComparable?> GetEqualityComponents()
     {
-        yield return Street.Value;
-        yield return City.Value;
-        yield return State.Value;
-        yield return PostalCode.Value;
-        yield return Country.Value;
+        yield return Street;
+        yield return City;
+        yield return State;
+        yield return PostalCode;
+        yield return Country;
     }
 }

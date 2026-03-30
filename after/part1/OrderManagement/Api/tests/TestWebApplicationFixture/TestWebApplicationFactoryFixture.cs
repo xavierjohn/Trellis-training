@@ -1,45 +1,37 @@
-﻿namespace Api.Tests;
+namespace Api.Tests;
 
-using MartinCostello.Logging.XUnit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 using OrderManagement.AntiCorruptionLayer;
 using Trellis.EntityFrameworkCore;
-using Xunit.v3;
+using Trellis.Testing;
 
-public class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>, ITestOutputHelperAccessor
+public sealed class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>
 {
     private readonly SqliteConnection _connection;
 
     public TestWebApplicationFactoryFixture()
     {
-        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
-
-        // Keep a persistent connection for in-memory SQLite
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
     }
 
-    public ITestOutputHelper? OutputHelper { get; set; }
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.ConfigureLogging(p => p.AddXUnit(this));
-
+        builder.UseEnvironment("Development");
         builder.ConfigureServices(services =>
-        {
-            // Remove the production database registration
-            services.RemoveAll<DbContextOptions<AppDbContext>>();
+            services.ReplaceDbProvider<AppDbContext>(options =>
+                options.UseSqlite(_connection).AddTrellisInterceptors()));
+    }
 
-            services.AddDbContext<AppDbContext>(options =>
-                options.UseSqlite(_connection)
-                       .AddTrellisInterceptors());
-        });
+    public async Task EnsureDatabaseCreatedAsync()
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.EnsureCreatedAsync();
     }
 
     protected override void Dispose(bool disposing)
@@ -48,10 +40,4 @@ public class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>, 
         if (disposing)
             _connection.Dispose();
     }
-}
-
-[CollectionDefinition(Id)]
-public class TestWebApplicationFactoryCollectionFixture : ICollectionFixture<TestWebApplicationFactoryFixture>
-{
-    public const string Id = "Test web application factory fixture collection";
 }

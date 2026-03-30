@@ -1,38 +1,39 @@
-#pragma warning disable TRLS001, TRLS003
-
 namespace Domain.Tests;
 
 using OrderManagement.Domain;
 using Trellis.Primitives;
-using Trellis.Testing;
+
+#pragma warning disable TRLS003
 
 public class CustomerTests
 {
-    private static FirstName ValidFirstName => FirstName.Create("John");
-    private static LastName ValidLastName => LastName.Create("Doe");
-    private static EmailAddress ValidEmail => EmailAddress.Create("john@example.com");
-    private static PhoneNumber ValidPhone => PhoneNumber.Create("+12025551234");
-    private static ShippingAddress ValidAddress => ShippingAddress.TryCreate(
-        Street.Create("123 Main St"), City.Create("Springfield"),
-        State.Create("IL"), PostalCode.Create("62701"), Country.Create("USA")).Value;
-
     [Fact]
-    public void TryCreate_ValidWithPhone_ReturnsSuccess()
+    public void TryCreate_valid_customer_with_phone_succeeds()
     {
-        var result = Customer.TryCreate(ValidFirstName, ValidLastName, ValidEmail, ValidPhone, ValidAddress);
+        var result = Customer.TryCreate(
+            FirstName.Create("John"),
+            LastName.Create("Doe"),
+            EmailAddress.Create("john@example.com"),
+            Maybe.From(PhoneNumber.Create("+12025551234")),
+            ShippingAddress.TryCreate(Street.Create("123 Main"), City.Create("Seattle"), State.Create("WA"), PostalCode.Create("98101"), Country.Create("US")).Value);
 
         result.Should().BeSuccess();
-        result.Value.FirstName.Should().Be(ValidFirstName);
-        result.Value.LastName.Should().Be(ValidLastName);
-        result.Value.Email.Should().Be(ValidEmail);
-        result.Value.PhoneNumber.Should().HaveValue();
-        result.Value.ShippingAddress.Should().Be(ValidAddress);
+        var customer = result.Value;
+        customer.FirstName.Value.Should().Be("John");
+        customer.LastName.Value.Should().Be("Doe");
+        customer.Email.Value.Should().Be("john@example.com");
+        customer.PhoneNumber.Should().HaveValue();
     }
 
     [Fact]
-    public void TryCreate_ValidWithoutPhone_ReturnsSuccess()
+    public void TryCreate_valid_customer_without_phone_succeeds()
     {
-        var result = Customer.TryCreate(ValidFirstName, ValidLastName, ValidEmail, Maybe<PhoneNumber>.None, ValidAddress);
+        var result = Customer.TryCreate(
+            FirstName.Create("Jane"),
+            LastName.Create("Doe"),
+            EmailAddress.Create("jane@example.com"),
+            Maybe<PhoneNumber>.None,
+            ShippingAddress.TryCreate(Street.Create("456 Oak"), City.Create("Portland"), State.Create("OR"), PostalCode.Create("97201"), Country.Create("US")).Value);
 
         result.Should().BeSuccess();
         result.Value.PhoneNumber.Should().BeNone();

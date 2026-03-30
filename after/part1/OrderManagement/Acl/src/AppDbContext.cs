@@ -1,12 +1,9 @@
-﻿namespace OrderManagement.AntiCorruptionLayer;
+namespace OrderManagement.AntiCorruptionLayer;
 
 using Microsoft.EntityFrameworkCore;
 using OrderManagement.Domain;
 using Trellis.EntityFrameworkCore;
 
-/// <summary>
-/// Application database context with Trellis conventions.
-/// </summary>
 public class AppDbContext : DbContext
 {
     public DbSet<Customer> Customers => Set<Customer>();

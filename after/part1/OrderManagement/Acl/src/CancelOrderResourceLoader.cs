@@ -4,10 +4,8 @@ using OrderManagement.Application.Orders;
 using OrderManagement.Domain;
 using Trellis.Authorization;
 using Trellis.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 
-/// <summary>
-/// Resource loader for CancelOrderCommand — loads Order by ID for ownership authorization.
-/// </summary>
 internal class CancelOrderResourceLoader : ResourceLoaderById<CancelOrderCommand, Order, OrderId>
 {
     private readonly AppDbContext _context;
@@ -18,9 +16,9 @@ internal class CancelOrderResourceLoader : ResourceLoaderById<CancelOrderCommand
 
     protected override async Task<Result<Order>> GetByIdAsync(OrderId id, CancellationToken cancellationToken) =>
         await _context.Orders
+            .Include(o => o.LineItems)
             .Where(o => o.Id == id)
             .FirstOrDefaultResultAsync(
                 Error.NotFound($"Order {id.Value} not found."),
-                cancellationToken)
-            .ConfigureAwait(false);
+                cancellationToken);
 }

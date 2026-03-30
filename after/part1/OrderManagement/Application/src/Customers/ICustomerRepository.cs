@@ -1,10 +1,7 @@
-namespace OrderManagement.Application.Customers;
+namespace OrderManagement.Application;
 
 using OrderManagement.Domain;
 
-/// <summary>
-/// Repository interface for Customer persistence.
-/// </summary>
 public interface ICustomerRepository
 {
     Task<Maybe<Customer>> FindByIdAsync(CustomerId id, CancellationToken cancellationToken);

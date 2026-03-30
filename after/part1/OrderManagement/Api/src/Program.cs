@@ -1,4 +1,4 @@
-﻿using Scalar.AspNetCore;
+using Scalar.AspNetCore;
 using ServiceLevelIndicators;
 using OrderManagement.AntiCorruptionLayer;
 using OrderManagement.Api;
@@ -15,7 +15,6 @@ builder.Services
 
 var app = builder.Build();
 
-// Create database schema in development (use migrations in production)
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();

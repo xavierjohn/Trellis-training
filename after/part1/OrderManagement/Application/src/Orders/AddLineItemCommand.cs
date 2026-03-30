@@ -1,24 +1,14 @@
 namespace OrderManagement.Application.Orders;
 
 using Mediator;
-using OrderManagement.Application.Products;
 using OrderManagement.Domain;
 using Trellis.Authorization;
 
-/// <summary>
-/// Adds a line item to a draft order.
-/// </summary>
-public sealed record AddLineItemCommand(
-    OrderId OrderId,
-    ProductId ProductId,
-    LineItemQuantity Quantity) : ICommand<Result<Order>>, IAuthorize
+public sealed record AddLineItemCommand(OrderId OrderId, ProductId ProductId, LineItemQuantity Quantity) : ICommand<Result<Order>>, IAuthorize
 {
     public IReadOnlyList<string> RequiredPermissions { get; } = [Permissions.OrdersCreate];
 }
 
-/// <summary>
-/// Handler for AddLineItemCommand.
-/// </summary>
 public sealed class AddLineItemCommandHandler : ICommandHandler<AddLineItemCommand, Result<Order>>
 {
     private readonly IOrderRepository _orderRepository;
@@ -32,17 +22,21 @@ public sealed class AddLineItemCommandHandler : ICommandHandler<AddLineItemComma
 
     public async ValueTask<Result<Order>> Handle(AddLineItemCommand command, CancellationToken cancellationToken)
     {
-        var orderMaybe = await _orderRepository.FindByIdAsync(command.OrderId, cancellationToken);
-        var productMaybe = await _productRepository.FindByIdAsync(command.ProductId, cancellationToken);
+        var orderResult = (await _orderRepository.FindByIdAsync(command.OrderId, cancellationToken))
+            .ToResult(Error.NotFound($"Order {command.OrderId.Value} not found."));
+        if (orderResult.IsFailure)
+            return orderResult.Error;
 
-        return await orderMaybe
-            .ToResult(Error.NotFound($"Order {command.OrderId} not found."))
-            .Combine(productMaybe.ToResult(Error.NotFound($"Product {command.ProductId} not found.")))
-            .Bind((order, product) =>
-            {
-                var lineItem = LineItem.Create(command.ProductId, product.ProductName, command.Quantity, product.UnitPrice);
-                return order.AddLineItem(lineItem);
-            })
-            .BindAsync(order => _orderRepository.SaveAsync(order, cancellationToken).MapAsync(_ => order));
+        var productResult = (await _productRepository.FindByIdAsync(command.ProductId, cancellationToken))
+            .ToResult(Error.NotFound($"Product {command.ProductId.Value} not found."));
+        if (productResult.IsFailure)
+            return productResult.Error;
+
+        var order = orderResult.Value;
+        var product = productResult.Value;
+
+        var lineItem = new LineItem(command.ProductId, product.ProductName, command.Quantity, product.UnitPrice);
+        return await order.AddLineItem(lineItem)
+            .CheckAsync(_ => _orderRepository.SaveAsync(order, cancellationToken));
     }
 }

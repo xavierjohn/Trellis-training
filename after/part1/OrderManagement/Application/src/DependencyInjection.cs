@@ -1,4 +1,4 @@
-﻿namespace OrderManagement.Application;
+namespace OrderManagement.Application;
 
 using Microsoft.Extensions.DependencyInjection;
 using Trellis.Mediator;

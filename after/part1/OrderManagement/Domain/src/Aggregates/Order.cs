@@ -28,25 +28,6 @@ public partial class Order : Aggregate<OrderId>
     public partial Maybe<DateTime> SubmittedAt { get; private set; }
     public partial Maybe<DateTime> ShippedAt { get; private set; }
 
-    /// <summary>
-    /// Calculates the order total as sum of (unitPrice × quantity) for all line items.
-    /// </summary>
-    public Money Total
-    {
-        get
-        {
-            var total = Money.Create(0m, "USD");
-            foreach (var item in _lineItems)
-            {
-                var lineTotal = item.UnitPrice.Multiply(item.Quantity.Value);
-                if (lineTotal.IsSuccess)
-                    total = total.Add(lineTotal.Value).Value;
-            }
-            return total;
-        }
-    }
-
-    /// <summary>EF Core constructor.</summary>
     private Order() : base(default!)
     {
         _machine = new LazyStateMachine<OrderStatus, string>(
@@ -70,88 +51,149 @@ public partial class Order : Aggregate<OrderId>
             ConfigureStateMachine);
     }
 
-    /// <summary>
-    /// Creates a new order in Draft status with line items.
-    /// </summary>
     public static Result<Order> TryCreate(
         CustomerId customerId,
         string createdByActorId,
-        List<LineItem> lineItems) =>
-        Result.Ensure(lineItems.Count > 0, Error.Validation("An order must have at least one line item.", "lineItems"))
-            .Map(_ => new Order(customerId, createdByActorId, lineItems));
+        List<LineItem> lineItems)
+    {
+        if (lineItems.Count == 0)
+            return Error.Validation("Order must have at least one line item.", "lineItems");
 
-    /// <summary>
-    /// Adds a line item to a draft order.
-    /// </summary>
-    public Result<Order> AddLineItem(LineItem lineItem) =>
-        Result.Ensure(Status == OrderStatus.Draft, Error.Validation("Can only add line items to a Draft order.", "status"))
-            .Ensure(_ => !_lineItems.Any(li => li.ProductId == lineItem.ProductId),
-                Error.Validation("This product is already in the order. Combine quantities instead.", "productId"))
-            .Tap(_ => _lineItems.Add(lineItem))
-            .Map(_ => this);
+        var duplicateProductIds = lineItems.GroupBy(li => li.ProductId).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        if (duplicateProductIds.Count > 0)
+            return Error.Validation("Duplicate products are not allowed in the same order.", "lineItems");
 
-    /// <summary>
-    /// Removes a line item from a draft order. Cannot remove the last line item.
-    /// </summary>
-    public Result<Order> RemoveLineItem(LineItemId lineItemId) =>
-        Result.Ensure(Status == OrderStatus.Draft, Error.Validation("Can only remove line items from a Draft order.", "status"))
-            .Ensure(_ => _lineItems.Count > 1, Error.Validation("Cannot remove the last line item from an order.", "lineItems"))
-            .Bind(_ =>
+        return new Order(customerId, createdByActorId, lineItems);
+    }
+
+    public Result<Order> AddLineItem(LineItem lineItem)
+    {
+        if (Status != OrderStatus.Draft)
+            return Error.Validation("Can only add line items to a draft order.", "status");
+
+        if (_lineItems.Any(li => li.ProductId == lineItem.ProductId))
+            return Error.Validation("Product already exists in the order.", "productId");
+
+        _lineItems.Add(lineItem);
+        return this;
+    }
+
+    public Result<Order> RemoveLineItem(LineItemId lineItemId)
+    {
+        if (Status != OrderStatus.Draft)
+            return Error.Validation("Can only remove line items from a draft order.", "status");
+
+        var lineItem = _lineItems.FirstOrDefault(li => li.Id == lineItemId);
+        if (lineItem is null)
+            return Error.NotFound($"Line item {lineItemId.Value} not found.");
+
+        if (_lineItems.Count <= 1)
+            return Error.Validation("Cannot remove the last line item from an order.", "lineItems");
+
+        _lineItems.Remove(lineItem);
+        return this;
+    }
+
+    public Result<Order> Submit(List<Product> products)
+    {
+        if (_lineItems.Count == 0)
+            return Error.Validation("Order must have at least one line item.", "lineItems");
+
+        // Check stock and reserve
+        foreach (var lineItem in _lineItems)
+        {
+            var product = products.FirstOrDefault(p => p.Id == lineItem.ProductId);
+            if (product is null)
+                return Error.NotFound($"Product {lineItem.ProductId.Value} not found.");
+
+            var stockQtyResult = StockQuantity.TryCreate(lineItem.Quantity.Value);
+            if (!stockQtyResult.TryGetValue(out var stockQty))
+                return stockQtyResult.Error;
+
+            var reserveResult = product.ReserveStock(stockQty);
+            if (reserveResult.IsFailure)
+                return reserveResult.Error;
+        }
+
+        return _machine.FireResult(Triggers.Submit)
+            .Map(_ =>
             {
-                var item = _lineItems.FirstOrDefault(li => li.Id == lineItemId);
-                if (item is null)
-                    return Result.Failure<Order>(Error.NotFound($"Line item {lineItemId} not found."));
-                _lineItems.Remove(item);
-                return Result.Success(this);
+                var now = DateTime.UtcNow;
+                SubmittedAt = now;
+                DomainEvents.Add(new OrderSubmittedEvent(Id, CustomerId, CalculateTotal(), now));
+                return this;
             });
+    }
 
-    /// <summary>
-    /// Submits the order (Draft → Submitted). Sets SubmittedAt.
-    /// </summary>
-    public Result<Order> Submit(DateTime utcNow) =>
-        _machine.FireResult(Triggers.Submit)
-            .Tap(_ =>
-            {
-                SubmittedAt = utcNow;
-                DomainEvents.Add(new OrderSubmittedEvent(Id, CustomerId, Total, utcNow));
-            })
-            .Map(_ => this);
-
-    /// <summary>
-    /// Approves the order (Submitted → Approved).
-    /// </summary>
     public Result<Order> Approve() =>
         _machine.FireResult(Triggers.Approve)
-            .Tap(_ => DomainEvents.Add(new OrderApprovedEvent(Id, DateTime.UtcNow)))
-            .Map(_ => this);
-
-    /// <summary>
-    /// Ships the order (Approved → Shipped). Sets ShippedAt.
-    /// </summary>
-    public Result<Order> Ship(DateTime utcNow) =>
-        _machine.FireResult(Triggers.Ship)
-            .Tap(_ =>
+            .Map(_ =>
             {
-                ShippedAt = utcNow;
-                DomainEvents.Add(new OrderShippedEvent(Id, CustomerId, utcNow));
-            })
-            .Map(_ => this);
+                DomainEvents.Add(new OrderApprovedEvent(Id, DateTime.UtcNow));
+                return this;
+            });
 
-    /// <summary>
-    /// Delivers the order (Shipped → Delivered).
-    /// </summary>
+    public Result<Order> Ship() =>
+        _machine.FireResult(Triggers.Ship)
+            .Map(_ =>
+            {
+                var now = DateTime.UtcNow;
+                ShippedAt = now;
+                DomainEvents.Add(new OrderShippedEvent(Id, CustomerId, now));
+                return this;
+            });
+
     public Result<Order> Deliver() =>
         _machine.FireResult(Triggers.Deliver)
-            .Tap(_ => DomainEvents.Add(new OrderDeliveredEvent(Id, DateTime.UtcNow)))
-            .Map(_ => this);
+            .Map(_ =>
+            {
+                DomainEvents.Add(new OrderDeliveredEvent(Id, DateTime.UtcNow));
+                return this;
+            });
 
-    /// <summary>
-    /// Cancels the order. Allowed from Draft, Submitted, or Approved.
-    /// </summary>
-    public Result<Order> Cancel() =>
-        _machine.FireResult(Triggers.Cancel)
-            .Tap(newStatus => DomainEvents.Add(new OrderCancelledEvent(Id, Status, DateTime.UtcNow)))
-            .Map(_ => this);
+    public Result<Order> Cancel(List<Product>? products = null)
+    {
+        var previousStatus = Status;
+
+        var fireResult = _machine.FireResult(Triggers.Cancel);
+        if (fireResult.IsFailure)
+            return fireResult.Error;
+
+        // Release stock if was Submitted or Approved
+        if (previousStatus is OrderStatus.Submitted or OrderStatus.Approved && products is not null)
+        {
+            foreach (var lineItem in _lineItems)
+            {
+                var product = products.FirstOrDefault(p => p.Id == lineItem.ProductId);
+                if (product is not null)
+                {
+                    var stockQty = StockQuantity.Create(lineItem.Quantity.Value);
+#pragma warning disable TRLS001
+                    _ = product.ReleaseStock(stockQty);
+#pragma warning restore TRLS001
+                }
+            }
+        }
+
+        DomainEvents.Add(new OrderCancelledEvent(Id, previousStatus, DateTime.UtcNow));
+        return this;
+    }
+
+    public Money CalculateTotal()
+    {
+        var total = Money.Zero("USD").Value;
+        foreach (var lineItem in _lineItems)
+        {
+            var lineTotal = lineItem.UnitPrice.Multiply(lineItem.Quantity.Value);
+            if (lineTotal.TryGetValue(out var lt))
+            {
+                var sum = total.Add(lt);
+                if (sum.TryGetValue(out var s))
+                    total = s;
+            }
+        }
+        return total;
+    }
 
     private static void ConfigureStateMachine(Stateless.StateMachine<OrderStatus, string> machine)
     {
@@ -171,6 +213,7 @@ public partial class Order : Aggregate<OrderId>
             .Permit(Triggers.Deliver, OrderStatus.Delivered);
 
         machine.Configure(OrderStatus.Delivered);
+
         machine.Configure(OrderStatus.Cancelled);
     }
 }

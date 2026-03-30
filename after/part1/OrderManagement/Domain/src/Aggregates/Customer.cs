@@ -3,7 +3,7 @@ namespace OrderManagement.Domain;
 using Trellis.Primitives;
 
 /// <summary>
-/// Customer aggregate with name, email, optional phone, and shipping address.
+/// Customer aggregate.
 /// </summary>
 public partial class Customer : Aggregate<CustomerId>
 {
@@ -13,7 +13,6 @@ public partial class Customer : Aggregate<CustomerId>
     public partial Maybe<PhoneNumber> PhoneNumber { get; private set; }
     public ShippingAddress ShippingAddress { get; private set; } = null!;
 
-    /// <summary>EF Core constructor.</summary>
     private Customer() : base(default!) { }
 
     private Customer(FirstName firstName, LastName lastName, EmailAddress email, Maybe<PhoneNumber> phoneNumber, ShippingAddress shippingAddress)
@@ -26,11 +25,6 @@ public partial class Customer : Aggregate<CustomerId>
         ShippingAddress = shippingAddress;
     }
 
-    public static Result<Customer> TryCreate(
-        FirstName firstName,
-        LastName lastName,
-        EmailAddress email,
-        Maybe<PhoneNumber> phoneNumber,
-        ShippingAddress shippingAddress) =>
+    public static Result<Customer> TryCreate(FirstName firstName, LastName lastName, EmailAddress email, Maybe<PhoneNumber> phoneNumber, ShippingAddress shippingAddress) =>
         new Customer(firstName, lastName, email, phoneNumber, shippingAddress);
 }

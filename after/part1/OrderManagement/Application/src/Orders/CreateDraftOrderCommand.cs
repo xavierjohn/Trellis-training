@@ -1,23 +1,15 @@
 namespace OrderManagement.Application.Orders;
 
 using Mediator;
-using OrderManagement.Application.Customers;
-using OrderManagement.Application.Products;
 using OrderManagement.Domain;
 using Trellis.Authorization;
 using Trellis.Mediator;
 
-/// <summary>
-/// Input for a line item in a create draft order command.
-/// </summary>
-public sealed record CreateOrderLineItem(ProductId ProductId, LineItemQuantity Quantity);
+public sealed record CreateDraftOrderLineItemInput(ProductId ProductId, LineItemQuantity Quantity);
 
-/// <summary>
-/// Creates a draft order.
-/// </summary>
 public sealed record CreateDraftOrderCommand(
     CustomerId CustomerId,
-    IReadOnlyList<CreateOrderLineItem> LineItems) : ICommand<Result<Order>>, IAuthorize, IValidate
+    List<CreateDraftOrderLineItemInput> LineItems) : ICommand<Result<Order>>, IAuthorize, IValidate
 {
     public IReadOnlyList<string> RequiredPermissions { get; } = [Permissions.OrdersCreate];
 
@@ -26,17 +18,14 @@ public sealed record CreateDraftOrderCommand(
         if (LineItems.Count == 0)
             return Result.Failure(Error.Validation("At least one line item is required.", "lineItems"));
 
-        var productIds = LineItems.Select(li => li.ProductId).ToList();
-        if (productIds.Distinct().Count() != productIds.Count)
-            return Result.Failure(Error.Validation("Duplicate product IDs are not allowed. Combine quantities instead.", "lineItems"));
+        var duplicateProductIds = LineItems.GroupBy(li => li.ProductId).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        if (duplicateProductIds.Count > 0)
+            return Result.Failure(Error.Validation("Duplicate products are not allowed in the same order.", "lineItems"));
 
         return Result.Success();
     }
 }
 
-/// <summary>
-/// Handler for CreateDraftOrderCommand.
-/// </summary>
 public sealed class CreateDraftOrderCommandHandler : ICommandHandler<CreateDraftOrderCommand, Result<Order>>
 {
     private readonly ICustomerRepository _customerRepository;
@@ -58,29 +47,29 @@ public sealed class CreateDraftOrderCommandHandler : ICommandHandler<CreateDraft
 
     public async ValueTask<Result<Order>> Handle(CreateDraftOrderCommand command, CancellationToken cancellationToken)
     {
+        var actor = await _actorProvider.GetCurrentActorAsync(cancellationToken);
         var productIds = command.LineItems.Select(li => li.ProductId).ToList();
 
-        var customerMaybe = await _customerRepository.FindByIdAsync(command.CustomerId, cancellationToken);
-        var customerResult = customerMaybe.ToResult(Error.NotFound($"Customer {command.CustomerId} not found."));
-        if (customerResult.IsFailure) return customerResult.Error;
+        var customerResult = (await _customerRepository.FindByIdAsync(command.CustomerId, cancellationToken))
+            .ToResult(Error.NotFound($"Customer {command.CustomerId.Value} not found."));
+        if (customerResult.IsFailure)
+            return customerResult.Error;
 
         var products = await _productRepository.GetByIdsAsync(productIds, cancellationToken);
-
-        // Verify all products were found
-        foreach (var lineItem in command.LineItems)
+        if (products.Count != productIds.Count)
         {
-            if (!products.Any(p => p.Id == lineItem.ProductId))
-                return Error.NotFound($"Product {lineItem.ProductId} not found.");
+            var missingIds = productIds.Where(id => !products.Any(p => p.Id == id)).Select(id => id.Value.ToString());
+            return Error.NotFound($"Products not found: {string.Join(", ", missingIds)}");
         }
 
-        var lineItems = command.LineItems.Select(li =>
+        var lineItems = new List<LineItem>();
+        foreach (var input in command.LineItems)
         {
-            var product = products.First(p => p.Id == li.ProductId);
-            return LineItem.Create(li.ProductId, product.ProductName, li.Quantity, product.UnitPrice);
-        }).ToList();
+            var product = products.First(p => p.Id == input.ProductId);
+            lineItems.Add(new LineItem(input.ProductId, product.ProductName, input.Quantity, product.UnitPrice));
+        }
 
-        var actor = _actorProvider.GetCurrentActor();
         return await Order.TryCreate(command.CustomerId, actor.Id, lineItems)
-            .BindAsync(order => _orderRepository.SaveAsync(order, cancellationToken).MapAsync(_ => order));
+            .CheckAsync(order => _orderRepository.SaveAsync(order, cancellationToken));
     }
 }

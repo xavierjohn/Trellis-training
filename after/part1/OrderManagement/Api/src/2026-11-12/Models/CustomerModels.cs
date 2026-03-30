@@ -1,31 +1,36 @@
+#pragma warning disable CS1591
 namespace OrderManagement.Api.v2026_11_12.Models;
 
 using OrderManagement.Domain;
+using Trellis.Primitives;
 
-/// <summary>
-/// Response model for a customer.
-/// </summary>
+public record CreateCustomerRequest
+{
+    public FirstName FirstName { get; init; } = null!;
+    public LastName LastName { get; init; } = null!;
+    public EmailAddress Email { get; init; } = null!;
+    public Maybe<PhoneNumber> PhoneNumber { get; init; }
+    public ShippingAddressRequest ShippingAddress { get; init; } = null!;
+}
+
+public record ShippingAddressRequest
+{
+    public Street Street { get; init; } = null!;
+    public City City { get; init; } = null!;
+    public State State { get; init; } = null!;
+    public PostalCode PostalCode { get; init; } = null!;
+    public Country Country { get; init; } = null!;
+}
+
 public record CustomerResponse
 {
-    /// <summary>Customer identifier.</summary>
     public Guid Id { get; init; }
-
-    /// <summary>Customer first name.</summary>
     public string FirstName { get; init; } = null!;
-
-    /// <summary>Customer last name.</summary>
     public string LastName { get; init; } = null!;
-
-    /// <summary>Customer email address.</summary>
     public string Email { get; init; } = null!;
-
-    /// <summary>Customer phone number, if provided.</summary>
     public string? PhoneNumber { get; init; }
-
-    /// <summary>Customer shipping address.</summary>
     public ShippingAddressResponse ShippingAddress { get; init; } = null!;
 
-    /// <summary>Maps from domain model to response.</summary>
     public static CustomerResponse From(Customer customer) => new()
     {
         Id = customer.Id.Value,
@@ -44,23 +49,11 @@ public record CustomerResponse
     };
 }
 
-/// <summary>
-/// Response model for a shipping address.
-/// </summary>
 public record ShippingAddressResponse
 {
-    /// <summary>Street address.</summary>
     public string Street { get; init; } = null!;
-
-    /// <summary>City name.</summary>
     public string City { get; init; } = null!;
-
-    /// <summary>State or province.</summary>
     public string State { get; init; } = null!;
-
-    /// <summary>Postal or ZIP code.</summary>
     public string PostalCode { get; init; } = null!;
-
-    /// <summary>Country name.</summary>
     public string Country { get; init; } = null!;
 }

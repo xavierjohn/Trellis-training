@@ -1,3 +1,4 @@
+#pragma warning disable CS1591
 namespace OrderManagement.Api.v2026_11_12.Controllers;
 
 using Mediator;
@@ -8,9 +9,6 @@ using OrderManagement.Application.Products;
 using OrderManagement.Domain;
 using Trellis.Asp;
 
-/// <summary>
-/// Products controller.
-/// </summary>
 [ApiController]
 [Consumes("application/json")]
 [Produces("application/json")]
@@ -19,12 +17,8 @@ public class ProductsController : ControllerBase
 {
     private readonly ISender _sender;
 
-    /// <summary>Constructor.</summary>
     public ProductsController(ISender sender) => _sender = sender;
 
-    /// <summary>
-    /// Create a new product.
-    /// </summary>
     [HttpPost]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -38,9 +32,6 @@ public class ProductsController : ControllerBase
             cancellationToken)
             .ToCreatedAtActionResultAsync(this, nameof(GetProduct), p => new { id = (Guid)p.Id }, ProductResponse.From);
 
-    /// <summary>
-    /// Get a product by ID.
-    /// </summary>
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -48,12 +39,9 @@ public class ProductsController : ControllerBase
     public async ValueTask<ActionResult<ProductResponse>> GetProduct(
         [CustomerResourceId] ProductId id,
         CancellationToken cancellationToken) =>
-        await _sender.Send(new GetProductByIdQuery(id), cancellationToken)
+        await _sender.Send(new GetProductQuery(id), cancellationToken)
             .ToActionResultAsync(this, ProductResponse.From);
 
-    /// <summary>
-    /// Add stock to a product.
-    /// </summary>
     [HttpPost("{id}/stock-additions")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

@@ -3,7 +3,7 @@ namespace OrderManagement.Domain;
 using Trellis.Primitives;
 
 /// <summary>
-/// Product aggregate with name, SKU, unit price, and stock quantity.
+/// Product aggregate with inventory tracking.
 /// </summary>
 public class Product : Aggregate<ProductId>
 {
@@ -12,7 +12,6 @@ public class Product : Aggregate<ProductId>
     public Money UnitPrice { get; private set; } = null!;
     public StockQuantity StockQuantity { get; private set; } = null!;
 
-    /// <summary>EF Core constructor.</summary>
     private Product() : base(default!) { }
 
     private Product(ProductName productName, Sku sku, Money unitPrice)
@@ -25,37 +24,35 @@ public class Product : Aggregate<ProductId>
     }
 
     public static Result<Product> TryCreate(ProductName productName, Sku sku, Money unitPrice) =>
-        new Product(productName, sku, unitPrice);
+        Result.Ensure(unitPrice.Amount > 0,
+                Error.Validation("Unit price must be greater than zero.", "unitPrice"))
+            .Map(_ => new Product(productName, sku, unitPrice));
 
-    /// <summary>
-    /// Increases stock quantity. Quantity must be positive.
-    /// </summary>
     public Result<Product> AddStock(StockQuantity quantity) =>
-        Result.Ensure(quantity.Value > 0, Error.Validation("Quantity must be positive.", "quantity"))
-            .Map(_ =>
+        Result.Ensure(quantity.Value > 0,
+                Error.Validation("Quantity must be positive.", "quantity"))
+            .Bind(_ => StockQuantity.TryCreate(StockQuantity.Value + quantity.Value))
+            .Map(newQty =>
             {
-                StockQuantity = StockQuantity.Create(StockQuantity.Value + quantity.Value);
+                StockQuantity = newQty;
                 return this;
             });
 
-    /// <summary>
-    /// Decreases stock quantity. Fails if insufficient stock.
-    /// </summary>
-    public Result<Product> ReserveStock(LineItemQuantity quantity) =>
+    public Result<Product> ReserveStock(StockQuantity quantity) =>
         Result.Ensure(StockQuantity.Value >= quantity.Value,
-                Error.Validation($"Insufficient stock. Available: {StockQuantity.Value}, Requested: {quantity.Value}.", "stockQuantity"))
-            .Map(_ =>
+                Error.Validation($"Insufficient stock. Available: {StockQuantity.Value}, requested: {quantity.Value}.", "quantity"))
+            .Bind(_ => StockQuantity.TryCreate(StockQuantity.Value - quantity.Value))
+            .Map(newQty =>
             {
-                StockQuantity = StockQuantity.Create(StockQuantity.Value - quantity.Value);
+                StockQuantity = newQty;
                 return this;
             });
 
-    /// <summary>
-    /// Releases previously reserved stock.
-    /// </summary>
-    public Result<Product> ReleaseStock(LineItemQuantity quantity)
-    {
-        StockQuantity = StockQuantity.Create(StockQuantity.Value + quantity.Value);
-        return this;
-    }
+    public Result<Product> ReleaseStock(StockQuantity quantity) =>
+        StockQuantity.TryCreate(StockQuantity.Value + quantity.Value)
+            .Map(newQty =>
+            {
+                StockQuantity = newQty;
+                return this;
+            });
 }

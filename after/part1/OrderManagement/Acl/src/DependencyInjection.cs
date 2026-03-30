@@ -1,10 +1,9 @@
-﻿namespace OrderManagement.AntiCorruptionLayer;
+namespace OrderManagement.AntiCorruptionLayer;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using OrderManagement.Application.Customers;
+using OrderManagement.Application;
 using OrderManagement.Application.Orders;
-using OrderManagement.Application.Products;
 using Trellis.EntityFrameworkCore;
 using Trellis.Mediator;
 

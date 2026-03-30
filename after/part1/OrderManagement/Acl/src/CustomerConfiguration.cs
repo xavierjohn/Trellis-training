@@ -3,10 +3,8 @@ namespace OrderManagement.AntiCorruptionLayer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using OrderManagement.Domain;
+using Trellis.EntityFrameworkCore;
 
-/// <summary>
-/// EF Core configuration for the Customer aggregate.
-/// </summary>
 internal class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 {
     public void Configure(EntityTypeBuilder<Customer> builder)
@@ -21,11 +19,11 @@ internal class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 
         builder.OwnsOne(c => c.ShippingAddress, sa =>
         {
-            sa.Property(a => a.Street).IsRequired().HasColumnName("ShippingStreet");
-            sa.Property(a => a.City).IsRequired().HasColumnName("ShippingCity");
-            sa.Property(a => a.State).IsRequired().HasColumnName("ShippingState");
-            sa.Property(a => a.PostalCode).IsRequired().HasColumnName("ShippingPostalCode");
-            sa.Property(a => a.Country).IsRequired().HasColumnName("ShippingCountry");
+            sa.Property(a => a.Street).IsRequired().HasColumnName("Street");
+            sa.Property(a => a.City).IsRequired().HasColumnName("City");
+            sa.Property(a => a.State).IsRequired().HasColumnName("State");
+            sa.Property(a => a.PostalCode).IsRequired().HasColumnName("PostalCode");
+            sa.Property(a => a.Country).IsRequired().HasColumnName("Country");
         });
     }
 }

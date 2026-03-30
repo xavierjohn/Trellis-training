@@ -5,9 +5,6 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using OrderManagement.Domain;
 using Trellis.EntityFrameworkCore;
 
-/// <summary>
-/// EF Core configuration for the Order aggregate and LineItem entity.
-/// </summary>
 internal class OrderConfiguration : IEntityTypeConfiguration<Order>
 {
     public void Configure(EntityTypeBuilder<Order> builder)
@@ -24,13 +21,13 @@ internal class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         builder.OwnsMany(o => o.LineItems, li =>
         {
+            li.WithOwner().HasForeignKey("OrderId");
             li.HasKey(l => l.Id);
             li.Property(l => l.ProductId).IsRequired();
             li.Property(l => l.ProductName).IsRequired();
             li.Property(l => l.Quantity).IsRequired();
-            li.WithOwner().HasForeignKey("OrderId");
         });
 
-        builder.Ignore(o => o.Total);
+        builder.Ignore(o => o.IsChanged);
     }
 }

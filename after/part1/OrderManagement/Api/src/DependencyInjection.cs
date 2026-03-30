@@ -1,4 +1,4 @@
-﻿namespace OrderManagement.Api;
+namespace OrderManagement.Api;
 
 using Asp.Versioning.Conventions;
 using Microsoft.Extensions.DependencyInjection;
