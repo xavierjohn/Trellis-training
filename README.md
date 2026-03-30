@@ -130,7 +130,7 @@ You're not measuring whether AI can write code. You're measuring whether **Trell
 - .NET 10 SDK
 - VS Code or Visual Studio
 - Docker Desktop (optional — for Aspire Dashboard)
-- Trellis ASP template: `dotnet new install Trellis.AspTemplate`
+- Trellis ASP template: `dotnet new install Trellis.AspTemplate::1.0.13-alpha`
 
 ## Quick Start
 
@@ -139,7 +139,7 @@ You're not measuring whether AI can write code. You're measuring whether **Trell
 git clone https://github.com/xavierjohn/trellis-training.git
 
 # 2. Install the template
-dotnet new install Trellis.AspTemplate
+dotnet new install Trellis.AspTemplate::1.0.13-alpha
 
 # 3. Read the training lab
 # Open docs/training-lab.md and follow Steps 1-8

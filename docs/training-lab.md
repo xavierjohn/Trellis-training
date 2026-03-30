@@ -8,7 +8,7 @@
 - .NET 10 SDK installed
 - VS Code or Visual Studio
 - Docker Desktop (optional — for Aspire Dashboard telemetry viewer)
-- Trellis ASP template installed (`dotnet new install Trellis.AspTemplate`)
+- Trellis ASP template installed (`dotnet new install Trellis.AspTemplate::1.0.13-alpha`)
 - Basic understanding of C# and web APIs
 
 ---
@@ -49,7 +49,7 @@ docker ps --format "table {{.Image}}\t{{.Ports}}\t{{.Status}}"
 1. Install the Trellis template (first time only — skip if already installed):
 
 ```bash
-dotnet new install Trellis.AspTemplate
+dotnet new install Trellis.AspTemplate::1.0.13-alpha
 ```
 
 2. Scaffold the project:
