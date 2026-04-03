@@ -194,12 +194,14 @@ Paste this into Copilot Chat as a follow-up prompt (in the same conversation tha
 > **Domain changes:**
 > - Add `Returned` to the OrderStatus enum
 > - Add a `ReturnReason` value object — required string, 10–500 characters
+> - Add `ReturnReason` as a property on the Order aggregate (absent until returned, persisted to database, included in API responses)
 > - Add `DeliveredAt` as a `Maybe<DateTime>` property on Order (set during Delivered transition)
 > - Add `ReturnedAt` as a `Maybe<DateTime>` property on Order (set during Return transition)
 > - Add state transition: `Delivered → Returned`
 >   - Precondition: Order must have been delivered within the last 30 days (`DeliveredAt` must exist and be no more than 30 days ago)
 >   - Side effect: Release reserved stock for each line item (same as cancel)
 >   - Side effect: Set `ReturnedAt` to current UTC time
+>   - Side effect: Set `ReturnReason` on the order
 >   - Domain event: `OrderReturnedEvent(OrderId, CustomerId, ReturnReason, ReturnedAt)`
 > - Shipped and Cancelled orders cannot be returned
 > - Already-returned orders cannot be returned again
@@ -250,6 +252,7 @@ dotnet test     # All previous tests pass + new return tests pass
 - [ ] Existing tests still pass (zero regressions)
 - [ ] `Returned` exists in OrderStatus enum
 - [ ] `ReturnReason` value object with TryCreate validation (10-500 chars)
+- [ ] `ReturnReason` persisted as a property on Order (absent until returned, included in API response)
 - [ ] `DeliveredAt` is `Maybe<DateTime>` on Order, set during Delivered transition
 - [ ] `ReturnedAt` is `Maybe<DateTime>` on Order, set during Return transition
 - [ ] State machine allows `Delivered → Returned` only

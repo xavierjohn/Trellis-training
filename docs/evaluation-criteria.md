@@ -106,6 +106,7 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **Zero regressions** | All pre-existing tests still pass after feature addition | 10 = all pass, <7 = AI broke existing code |
 | **Returned status added** | `Returned` added to OrderStatus enum; state machine updated with `Delivered → Returned` transition | 10 = all correct, <7 = state machine gap |
 | **ReturnReason value object** | `ReturnReason` uses TryCreate with 10-500 char validation | 10 = all correct, <7 = VO pattern gap |
+| **ReturnReason persisted** | `ReturnReason` stored as a property on Order, persisted to database, and included in the Order API response | 10 = all correct, <7 = spec gap |
 | **DeliveredAt tracked** | `DeliveredAt` is `Maybe<DateTime>` on Order, set during Delivered transition | 10 = all correct, <7 = Maybe pattern gap |
 | **30-day return window** | Return validates `DeliveredAt` within 30 days; uses `TimeProvider` (optional parameter defaulting to `TimeProvider.System`) for testable time validation | 10 = all correct, <7 = needs time pattern |
 | **Stock released on return** | Return releases reserved stock for each line item (same pattern as cancel) | 10 = all correct, <7 = pattern reuse gap |
