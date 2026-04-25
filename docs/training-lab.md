@@ -124,6 +124,16 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 OTEL_EXPORTER_OTLP_PROTOCOL=gr
 
 Open the **Aspire Dashboard** at http://localhost:18888 to view traces, metrics, and structured logs as you test.
 
+Before sending requests, verify the generated service replaced the template's sample surfaces consistently:
+
+- `api.http` uses Order Management endpoints, actors, payloads, and route names — no leftover Todo/customer-placeholder requests.
+- `http-client.env.json` points at the generated API port and any auth/header variables used by `api.http`.
+- `.vscode/launch.json` starts the generated API project and uses the same environment variables as the manual run command.
+- Integration tests and `WebApplicationFactory` helpers target the generated host, base URL, route prefixes, and actor headers.
+- Namespace/versioning/ProblemDetails metadata names the generated service, not the template sample.
+- Any OpenAPI/Scalar examples or README snippets match the generated routes and DTO names.
+- If the spec expects validation failures to return `400 Bad Request`, the app must override Trellis's default `Error.UnprocessableContent` mapping. By default, Trellis maps `Error.UnprocessableContent` to `422 Unprocessable Content`.
+
 Use the `.http` file with the [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension in VS Code. The smoke test should cover:
 
 1. **Create a customer** (as SalesRep) → expect `201 Created` with Location header
