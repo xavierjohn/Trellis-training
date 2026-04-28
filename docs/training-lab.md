@@ -234,7 +234,9 @@ Paste this into Copilot Chat as a follow-up prompt (in the same conversation tha
 > - API: HTTP round-trip for successful return, 422 for expired window
 >
 > **EF changes:**
-> - Add `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTime>` properties on Order — the source generator and `MaybeConvention` handle persistence automatically
+> - SQLite/EF: add `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTime>` properties on Order — the source generator and `MaybeConvention` handle persistence automatically. (Cosmos: serialize via the Cosmos SDK; nullable JSON properties for `Maybe<T>`.)
+>
+> **Coverage:** every row in `coverage-checklist-returns.md` must have a matching test in addition to keeping `coverage-checklist.md` green.
 
 ### What This Tests
 
