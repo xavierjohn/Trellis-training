@@ -87,9 +87,9 @@ git commit -m "Scaffold with Trellis template"
 
 ## Step 4: Implement the Service
 
-Open Copilot Chat, paste the **entire contents** of `specs/order-management-sqlite.md` as context, and follow it with this prompt:
+Open Copilot Chat. Attach `specs/order-management-sqlite.md` to the chat as `SPEC.md` (paperclip icon — don't paste the body). Then send this prompt verbatim:
 
-> Implement the Order Management service according to the spec above. Replace the existing sample code with the Order Management domain.
+> Implement the Order Management service according to the attached SPEC.md. Replace the existing sample code (Todo) with the Order Management domain. Follow `.github/copilot-instructions.md` and `.github/trellis-api-*.md` exactly.
 
 **Alternate prompt (SQL Server):** If you prefer SQL Server over SQLite, add to the prompt: *"Use SQL Server instead of SQLite. Use a separate console app to apply EF Core migrations instead of applying them on web service startup."*
 
