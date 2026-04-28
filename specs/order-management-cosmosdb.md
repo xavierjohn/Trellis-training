@@ -372,6 +372,7 @@ All successful responses use the following JSON shapes. Field names use **camelC
   "createdAt": "2026-01-15T12:00:00Z",
   "submittedAt": "2026-01-15T12:30:00Z | null",
   "shippedAt": "2026-01-16T09:00:00Z | null",
+  "deliveredAt": "2026-01-17T14:00:00Z | null",
   "lineItems": [
     {
       "id": "guid",
