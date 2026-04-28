@@ -73,6 +73,7 @@ The system uses role-based access control. Sales representatives create customer
 - CreatedAt — UTC timestamp when order was created
 - SubmittedAt — UTC timestamp when order was submitted (absent if not yet submitted)
 - ShippedAt — UTC timestamp when order was shipped (absent if not yet shipped)
+- DeliveredAt — UTC timestamp when order was delivered (absent if not yet delivered)
 
 **Line Item Properties:**
 - LineItemId (unique identifier)
@@ -121,6 +122,7 @@ Approved → Cancelled
 
 **Transition: Shipped → Delivered**
 - Precondition: None beyond being in Shipped status.
+- Side effect: Set DeliveredAt to current UTC time.
 - Domain event: OrderDeliveredEvent(OrderId, DeliveredAt)
 
 **Transition: Draft/Submitted/Approved → Cancelled**

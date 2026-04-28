@@ -204,12 +204,12 @@ Paste this into Copilot Chat as a follow-up prompt (in the same conversation tha
 > - Add `Returned` to the OrderStatus enum
 > - Add a `ReturnReason` value object — required string, 10–500 characters
 > - Add `ReturnReason` as a property on the Order aggregate (absent until returned, persisted to database, included in API responses)
-> - Add `DeliveredAt` as a `Maybe<DateTime>` property on Order (set during Delivered transition)
 > - Add `ReturnedAt` as a `Maybe<DateTime>` property on Order (set during Return transition)
+> - (`DeliveredAt` is already a base property — set during the Shipped → Delivered transition. Do not redefine it.)
 > - Add state transition: `Delivered → Returned`
->   - Precondition: Order must have been delivered within the last 30 days (`DeliveredAt` must exist and be no more than 30 days ago)
+>   - Precondition: Order must have been delivered within the last 30 days. **Use the injected `TimeProvider`** (do not call `DateTime.UtcNow`). Valid when `now - DeliveredAt <= TimeSpan.FromDays(30)`; invalid when greater than 30 days. Both `now` and `DeliveredAt` are UTC instants from `TimeProvider`.
 >   - Side effect: Release reserved stock for each line item (same as cancel)
->   - Side effect: Set `ReturnedAt` to current UTC time
+>   - Side effect: Set `ReturnedAt` to current UTC time (from `TimeProvider`)
 >   - Side effect: Set `ReturnReason` on the order
 >   - Domain event: `OrderReturnedEvent(OrderId, CustomerId, ReturnReason, ReturnedAt)`
 > - Shipped and Cancelled orders cannot be returned
@@ -217,7 +217,8 @@ Paste this into Copilot Chat as a follow-up prompt (in the same conversation tha
 >
 > **Application changes:**
 > - Add `ReturnOrderCommand` with `orders:return` permission
-> - Add `ReturnOrderHandler` — fetches order + products, validates return window, fires transition, releases stock, saves
+> - **Resource-based authorization (mirror Cancel Order):** the actor must be the order creator OR have `orders:read-all` (admin). Non-owner non-admin → `Error.Forbidden` (403).
+> - Add `ReturnOrderHandler` — fetches order + products, validates return window via injected `TimeProvider`, fires transition, releases stock, saves
 > - Add permission: `orders:return` to Permissions class
 > - SalesRep role gets `orders:return` permission
 >
@@ -226,12 +227,21 @@ Paste this into Copilot Chat as a follow-up prompt (in the same conversation tha
 > - Returns 200 OK with updated order on success
 > - Returns 422 if return window expired or invalid transition
 > - Returns 404 if order not found
-> - Returns 403 if missing permission
+> - Returns 403 if missing `orders:return` permission OR if the actor is not the order creator and not admin
+>
+> **Updated Order Response (Step 8 delta):** in addition to the v1 fields, the Order Response now includes:
+> ```json
+> {
+>   "status": "Draft | Submitted | Approved | Shipped | Delivered | Cancelled | Returned",
+>   "returnReason": "string | null",
+>   "returnedAt": "timestamp | null"
+> }
+> ```
 >
 > **Test changes:**
-> - Domain: return within window succeeds, return after 30 days fails, return from non-Delivered status fails, stock released on return
-> - Application: handler happy path, missing permission
-> - API: HTTP round-trip for successful return, 422 for expired window
+> - Domain: return within window succeeds, return at exactly 30 days succeeds (boundary inclusive), return after 30 days fails, return from non-Delivered status fails, stock released on return
+> - Application: handler happy path, missing permission, non-owner non-admin → 403, owner succeeds, admin succeeds
+> - API: HTTP round-trip for successful return, 422 for expired window, 403 for non-owner
 >
 > **EF changes:**
 > - SQLite/EF: add `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTime>` properties on Order — the source generator and `MaybeConvention` handle persistence automatically. (Cosmos: serialize via the Cosmos SDK; nullable JSON properties for `Maybe<T>`.)
@@ -264,17 +274,17 @@ dotnet test     # All previous tests pass + new return tests pass
 - [ ] `Returned` exists in OrderStatus enum
 - [ ] `ReturnReason` value object with TryCreate validation (10-500 chars)
 - [ ] `ReturnReason` persisted as a property on Order (absent until returned, included in API response)
-- [ ] `DeliveredAt` is `Maybe<DateTime>` on Order, set during Delivered transition
+- [ ] `DeliveredAt` is set during Delivered transition (already a base property)
 - [ ] `ReturnedAt` is `Maybe<DateTime>` on Order, set during Return transition
 - [ ] State machine allows `Delivered → Returned` only
-- [ ] Return checks 30-day window from `DeliveredAt`
+- [ ] Return checks 30-day window from `DeliveredAt` using injected `TimeProvider`
 - [ ] Stock release runs on return (same as cancel from Submitted/Approved)
 - [ ] `OrderReturnedEvent` raised with reason
 - [ ] `orders:return` permission added to Permissions class
-- [ ] `ReturnOrderCommand` implements `IAuthorize`
+- [ ] `ReturnOrderCommand` implements `IAuthorize` AND `IAuthorizeResource` (owner OR admin)
 - [ ] `POST /api/orders/{id}/return` endpoint exists with correct versioning
-- [ ] Domain tests cover: valid return, expired window, invalid source status
-- [ ] API test covers HTTP round-trip
+- [ ] Domain tests cover: valid return, 30-day boundary inclusive, expired window, invalid source status
+- [ ] API test covers HTTP round-trip + 403 for non-owner
 
 ### Commit
 

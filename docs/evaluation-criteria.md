@@ -116,9 +116,9 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **ReturnReason value object** | `ReturnReason` uses TryCreate with 10-500 char validation | 10 = all correct, <7 = VO pattern gap |
 | **ReturnReason persisted** | `ReturnReason` stored as a property on Order, persisted to database, and included in the Order API response | 10 = all correct, <7 = spec gap |
 | **DeliveredAt tracked** | `DeliveredAt` is `Maybe<DateTime>` on Order, set during Delivered transition | 10 = all correct, <7 = Maybe pattern gap |
-| **30-day return window** | Return validates `DeliveredAt` within 30 days; uses `TimeProvider` (optional parameter defaulting to `TimeProvider.System`) for testable time validation | 10 = all correct, <7 = needs time pattern |
+| **30-day return window** | Return validates `DeliveredAt` window using injected `TimeProvider`: valid when `now - DeliveredAt <= TimeSpan.FromDays(30)` (inclusive), invalid when greater than 30 days. Both timestamps are UTC instants from `TimeProvider`. | 10 = all correct, <7 = needs time pattern |
 | **Stock released on return** | Return releases reserved stock for each line item (same pattern as cancel) | 10 = all correct, <7 = pattern reuse gap |
-| **ReturnOrderCommand pipeline** | Command implements IAuthorize, permission `orders:return`, handler wired through Mediator | 10 = all correct, <7 = CQRS modification gap |
+| **ReturnOrderCommand pipeline** | Command implements `IAuthorize` (permission `orders:return`) AND `IAuthorizeResource` — owner OR admin (`orders:read-all`), mirroring Cancel Order. Non-owner non-admin → `Error.Forbidden` / 403; owner and admin succeed. Handler wired through Mediator. | 10 = all correct, <7 = CQRS modification gap |
 | **API endpoint correct** | `POST /api/orders/{id}/return` with versioning, correct status codes | 10 = all correct, <7 = endpoint pattern gap |
 | **Domain event raised** | `OrderReturnedEvent` with OrderId, CustomerId, ReturnReason, ReturnedAt | 10 = all present, <7 = event pattern gap |
 | **Return tests exist** | Domain + API tests for valid return, expired window, invalid status | 10 = all present, <7 = test modification gap |
