@@ -133,7 +133,7 @@ Before sending requests, verify the generated service replaced the template's sa
 - Namespace/versioning/ProblemDetails metadata names the generated service, not the template sample.
 - Any OpenAPI/Scalar examples or README snippets match the generated routes and DTO names.
 
-Use the `.http` filewith the [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension in VS Code. The smoke test should cover:
+Use the `.http` file with the [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension in VS Code. The smoke test should cover:
 
 1. **Create a customer** (as SalesRep) → expect `201 Created` with Location header
 2. **Create a customer without phone** → expect `201 Created`, PhoneNumber absent/null

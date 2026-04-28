@@ -30,9 +30,9 @@ Cancel   Cancel      Cancel
 Each state as a rounded rectangle with color coding (Draft=gray, Submitted=blue, Approved=green, Shipped=orange, Delivered=purple, Cancelled=red). Transitions as labeled arrows. Show "Reserve Stock" on Submit arrow, "Release Stock" on Cancel arrows.
 
 ### 4. `before-after.png` (700×400)
-**Used in:** README.md "Before & After" section
+**Used in:** README.md "From Scaffold to Service" section
 **Concept:** Split-screen comparison:
-- **Left side** labeled "Before (Template)" — shows a simple project tree with sample WeatherForecast code, faded/gray tone
+- **Left side** labeled "Before (Template)" — shows a simple project tree with the sample Todo code, faded/gray tone
 - **Right side** labeled "After (AI-Generated)" — shows the full Order Management project tree with real domain types, vibrant/colorful tone
 - Visual arrow or transform icon between them
 - Emphasize the transformation from boilerplate to real enterprise code
@@ -47,14 +47,15 @@ Each step as a numbered circle or card connected by arrows. Steps 4 and 8 highli
 
 ### 6. `evaluation-radar.png` (500×500)
 **Used in:** README.md "Evaluation" section
-**Concept:** Radar/spider chart with 5 axes:
-- L1: Structural (18 pts)
-- L2: Behavioral (13 pts)
-- L3: Architecture (13 pts)
+**Concept:** Radar/spider chart with 6 axes:
+- L1: Structural (23 pts)
+- L2: Behavioral (17 pts)
+- L3: Architecture (19 pts)
 - L4: Tests (9 pts)
 - L5: Feedback (4 pts)
+- L6: Feature Addition (11 pts)
 
-Show 2-3 overlaid polygons representing different AI models (e.g., Opus 4.6 filling most of the chart, Sonnet 4 filling much less). Include a legend. Colors: Opus=blue fill, Sonnet=gray fill.
+Show 2-3 overlaid polygons representing different AI models (e.g., Opus 4.6 filling most of the chart, Sonnet 4 filling much less). Include a legend. Colors: Opus=blue fill, Sonnet=gray fill. Total scale: 0–83.
 
 ### 7. `aspire-dashboard.png` (700×400)
 **Used in:** README.md "Observability" section
