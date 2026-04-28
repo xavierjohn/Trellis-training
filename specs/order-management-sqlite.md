@@ -85,7 +85,7 @@ The system uses role-based access control. Sales representatives create customer
 - An order must have at least one line item.
 - An order must reference a valid customer.
 - Each line item must reference a valid product.
-- The same product cannot appear in multiple line items within the same order. Combine quantities instead.
+- The same product cannot appear in multiple line items within the same order. Adding a duplicate is rejected (see §6.7); the caller must remove the existing line item first.
 - Quantity per line item must be between 1 and 999.
 - Unit price is captured at the time the line item is added and does not change if the product price changes later.
 
