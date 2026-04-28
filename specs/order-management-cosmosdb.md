@@ -193,7 +193,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** firstName, lastName, email, phoneNumber (optional), shippingAddress
 - **Validation:** firstName, lastName, email, shippingAddress fields are validated. phoneNumber, when provided, must be valid.
 - **Success:** Returns the created Customer.
-- **Failure:** Validation error → 400. Duplicate email → 409.
+- **Failure:** Validation error → 422. Duplicate email → 409.
 
 ### 6.2 Create Product (Command)
 
@@ -201,7 +201,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** productName, sku, unitPrice
 - **Validation:** productName, sku, unitPrice are validated.
 - **Success:** Returns the created Product.
-- **Failure:** Validation error → 400. Duplicate SKU → 409.
+- **Failure:** Validation error → 422. Duplicate SKU → 409.
 
 ### 6.3 Add Stock (Command)
 
@@ -209,7 +209,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** productId, quantity
 - **Validation:** quantity must be positive.
 - **Success:** Returns updated Product.
-- **Failure:** Validation error → 400. Product not found → 404.
+- **Failure:** Validation error → 422. Product not found → 404.
 
 ### 6.4 Create Draft Order (Command)
 
@@ -218,7 +218,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Validation:** customerId required, at least one line item, no duplicate productIds in list, each quantity between 1 and 999.
 - **Behavior:** Fetch customer and all referenced products. Create order with unit prices captured from products at creation time. Record the actor's identity as CreatedByActorId. Stock is NOT reserved yet.
 - **Success:** Returns the created Order in Draft status.
-- **Failure:** Validation error → 400. Customer or product not found → 404.
+- **Failure:** Validation error → 422. Customer or product not found → 404.
 
 ### 6.5 Add Line Item to Draft Order (Command)
 
@@ -235,7 +235,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId, lineItemId
 - **Behavior:** Order must be in Draft status. Order must have more than one line item (cannot remove the last one).
 - **Success:** Returns the updated Order without the removed line item.
-- **Failure:** Order not in Draft or cannot remove last line item → 400. Order or line item not found → 404.
+- **Failure:** Order not in Draft or cannot remove last line item → 422. Order or line item not found → 404.
 
 ### 6.7 Submit Order (Command)
 
@@ -243,7 +243,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition Draft → Submitted. Reserves stock for each line item.
 - **Success:** Returns the Order in Submitted status.
-- **Failure:** Invalid transition or insufficient stock → 400. Order not found → 404.
+- **Failure:** Invalid transition or insufficient stock → 422. Order not found → 404.
 
 ### 6.8 Approve Order (Command)
 
@@ -251,7 +251,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition Submitted → Approved.
 - **Success:** Returns the Order in Approved status.
-- **Failure:** Invalid transition → 400. Order not found → 404.
+- **Failure:** Invalid transition → 422. Order not found → 404.
 
 ### 6.9 Ship Order (Command)
 
@@ -259,7 +259,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition Approved → Shipped.
 - **Success:** Returns the Order in Shipped status.
-- **Failure:** Invalid transition → 400. Order not found → 404.
+- **Failure:** Invalid transition → 422. Order not found → 404.
 
 ### 6.10 Deliver Order (Command)
 
@@ -267,7 +267,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition Shipped → Delivered.
 - **Success:** Returns the Order in Delivered status.
-- **Failure:** Invalid transition → 400. Order not found → 404.
+- **Failure:** Invalid transition → 422. Order not found → 404.
 
 ### 6.11 Cancel Order (Command with Ownership Check)
 
@@ -276,7 +276,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition to Cancelled. If order was Submitted or Approved, releases reserved stock.
 - **Success:** Returns the Order in Cancelled status.
-- **Failure:** Forbidden (not owner and not admin) → 403. Invalid transition → 400. Order not found → 404.
+- **Failure:** Forbidden (not owner and not admin) → 403. Invalid transition → 422. Order not found → 404.
 
 ### 6.12 Get Order by ID (Query)
 
@@ -306,24 +306,24 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 
 | Method | Path | Operation | Permission | Success | Error Codes |
 |--------|------|-----------|-----------|---------|-------------|
-| POST | /api/customers | Create Customer | `customers:create` | 201 Created | 400, 403, 409 |
+| POST | /api/customers | Create Customer | `customers:create` | 201 Created | 422, 403, 409 |
 | GET | /api/customers/{id} | Get Customer | `customers:read` | 200 OK | 403, 404 |
-| POST | /api/products | Create Product | `products:create` | 201 Created | 400, 403, 409 |
+| POST | /api/products | Create Product | `products:create` | 201 Created | 422, 403, 409 |
 | GET | /api/products/{id} | Get Product | `products:read` | 200 OK | 403, 404 |
-| POST | /api/products/{id}/stock-additions | Add Stock | `products:manage-stock` | 200 OK | 400, 403, 404 |
-| POST | /api/orders | Create Draft Order | `orders:create` | 201 Created | 400, 403, 404 |
-| POST | /api/orders/{id}/line-items | Add Line Item | `orders:create` | 200 OK | 400, 403, 404 |
-| DELETE | /api/orders/{id}/line-items/{lineItemId} | Remove Line Item | `orders:create` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/submission | Submit Order | `orders:submit` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/approval | Approve Order | `orders:approve` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/shipment | Ship Order | `orders:ship` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/delivery | Deliver Order | `orders:deliver` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/cancellation | Cancel Order | `orders:cancel` + ownership | 200 OK | 400, 403, 404 |
+| POST | /api/products/{id}/stock-additions | Add Stock | `products:manage-stock` | 200 OK | 422, 403, 404 |
+| POST | /api/orders | Create Draft Order | `orders:create` | 201 Created | 422, 403, 404 |
+| POST | /api/orders/{id}/line-items | Add Line Item | `orders:create` | 200 OK | 422, 403, 404 |
+| DELETE | /api/orders/{id}/line-items/{lineItemId} | Remove Line Item | `orders:create` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/submission | Submit Order | `orders:submit` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/approval | Approve Order | `orders:approve` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/shipment | Ship Order | `orders:ship` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/delivery | Deliver Order | `orders:deliver` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/cancellation | Cancel Order | `orders:cancel` + ownership | 200 OK | 422, 403, 404 |
 | GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK | 403, 404 |
 | GET | /api/customers/{id}/orders | List Orders by Customer | `orders:read-all` | 200 OK | 403, 404 |
 | GET | /api/orders/overdue | List Overdue Orders | `orders:read-all` | 200 OK | 403 |
 
-- All requests must include `?api-version=2026-11-12` query parameter. Requests without a version return 400 Bad Request.
+- All requests must include `?api-version=2026-11-12` query parameter. Requests without a version return 400 Bad Request (framework-level error). 400 is reserved for framework-level request problems (missing `api-version`, malformed JSON, unbound route parameter); business validation failures return 422 Unprocessable Content.
 - All requests must include authentication context via the `X-Test-Actor` header (see Section 5.5). Requests without authentication context use the default Admin actor.
 - POST /customers, POST /products, and POST /orders return 201 Created with a Location header pointing to the created resource.
 - A `/health` endpoint must be available for health checks.
@@ -388,12 +388,12 @@ All successful responses use the following JSON shapes. Field names use **camelC
 **List Responses** (List Orders by Customer, List Overdue Orders):
 Returns a JSON array of Order Response objects: `[ { ... }, { ... } ]`
 
-**Error Response** (all error codes follow RFC 9457 Problem Details):
+**Error Response** (all error codes follow Problem Details per RFC 9457, compatible with the legacy RFC 7807 shape):
 ```json
 {
-  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
-  "title": "One or more validation errors occurred.",
-  "status": 400,
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.21",
+  "title": "Unprocessable Content",
+  "status": 422,
   "detail": "Specific error message",
   "errors": { "fieldName": ["Error detail"] },
   "traceId": "00-..."
@@ -470,14 +470,15 @@ Submit, Approve, Ship, Deliver, and Cancel require no request body.
 
 | Situation | Expected Error | HTTP Status |
 |-----------|---------------|-------------|
-| Invalid input (blank name, bad email format, etc.) | Validation error | 400 |
-| Invalid state transition (e.g., Draft → Approved) | Validation error | 400 |
-| Insufficient stock on submit | Validation error | 400 |
+| Invalid input (blank name, bad email format, etc.) | Validation error | 422 |
+| Invalid state transition (e.g., Draft → Approved) | Validation error | 422 |
+| Insufficient stock on submit | Validation error | 422 |
 | Entity not found by ID | Not Found error | 404 |
 | Duplicate email on customer creation | Conflict error | 409 |
 | Duplicate SKU on product creation | Conflict error | 409 |
 | Missing required permission | Forbidden error | 403 |
 | Cancel order by non-owner (without admin) | Forbidden error | 403 |
+| Missing `api-version`, malformed JSON, unbound route parameter | Framework-level error | 400 |
 
 ## 10. Testing Requirements
 
