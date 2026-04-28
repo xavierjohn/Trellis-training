@@ -33,9 +33,19 @@ The system uses role-based access control. Sales representatives create customer
 **Properties:**
 - FirstName — required, 1–100 characters
 - LastName — required, 1–100 characters
-- Email — valid email address, unique across all customers
-- PhoneNumber — optional, valid phone number
-- ShippingAddress — street, city, state, postal code, country (all required)
+- Email — valid email address, unique across all customers. Validation defers to Trellis built-in `EmailAddress` (RFC 5322).
+- PhoneNumber — optional, valid phone number. Validation defers to Trellis built-in `PhoneNumber` (E.164).
+- ShippingAddress — street, city, state, postal code, country (all required; field-level rules below)
+
+**Shipping address field rules:**
+
+| Field | Rule |
+|-------|------|
+| Street | required string, 1–100 characters |
+| City | required string, 1–100 characters |
+| State | required string, 1–100 characters |
+| PostalCode | required string, 3–20 characters |
+| Country | required string, 1–100 characters |
 
 **Rules:**
 - A customer cannot be created without a valid name, email, and shipping address.
@@ -89,6 +99,20 @@ The system uses role-based access control. Sales representatives create customer
 - The same product cannot appear in multiple line items within the same order. Adding a duplicate is rejected (see §6.7); the caller must remove the existing line item first.
 - Quantity per line item must be between 1 and 999.
 - Unit price is captured at the time the line item is added and does not change if the product price changes later.
+
+### 3.4 Timestamp fields
+
+The Order aggregate participates in several time-based events. This table specifies, for each `*At` field, whether it is a property on the aggregate (persisted), part of the API response, only carried on a domain event, or both.
+
+| Field | Aggregate property? | Persisted? | In API response? | Carried on event? |
+|-------|--------------------|-----------|------------------|-------------------|
+| `CreatedAt` | yes | yes | yes | — |
+| `SubmittedAt` | yes (`Maybe<DateTime>`) | yes | yes | `OrderSubmittedEvent` |
+| `ShippedAt` | yes (`Maybe<DateTime>`) | yes | yes | `OrderShippedEvent` |
+| `DeliveredAt` | yes (`Maybe<DateTime>`) | yes | yes | `OrderDeliveredEvent` |
+| `ReturnedAt` (Step 8) | yes (`Maybe<DateTime>`) | yes | yes | `OrderReturnedEvent` |
+| `ApprovedAt` | no | no | no | `OrderApprovedEvent` only |
+| `CancelledAt` | no | no | no | `OrderCancelledEvent` only |
 
 ## 4. State Machine
 
@@ -307,7 +331,7 @@ All operations are implemented as Commands or Queries using CQRS.
 
 - **Permission required:** `orders:read-all`
 - **Input:** customerId
-- **Behavior:** Verifies customer exists. Returns list of orders for the customer.
+- **Behavior:** Verifies customer exists. Returns list of orders for the customer, ordered by `CreatedAt` ascending. No pagination in this lab.
 - **Success:** Returns the list of Orders belonging to the Customer.
 - **Failure:** Customer not found → 404.
 
@@ -316,11 +340,12 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Permission required:** `orders:read-all`
 - **Definition:** An order is overdue if it has been in Submitted status for more than 7 days without being Approved.
 - **Input:** none
+- **Behavior:** Returns matching orders ordered by `CreatedAt` ascending. No pagination in this lab.
 - **Success:** Returns the list of overdue Orders.
 
 ## 7. API Endpoints
 
-All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). API versioning uses query parameter `api-version` with date values (e.g., `?api-version=2026-11-12`).
+All endpoints return JSON. Error responses follow Problem Details per RFC 9457, compatible with the legacy RFC 7807 shape. API versioning uses query parameter `api-version` with date values (e.g., `?api-version=2026-11-12`).
 
 | Method | Path | Operation | Permission | Success | Error Codes |
 |--------|------|-----------|-----------|---------|-------------|
@@ -466,12 +491,11 @@ Returns a JSON array of Order Response objects: `[ { ... }, { ... } ]`
 { "productId": "guid", "quantity": 1 }
 ```
 
-**Return Order** (Part 2 feature):
-```json
-{ "reason": "string (10-500 characters)" }
-```
-
 Submit, Approve, Ship, Deliver, and Cancel require no request body.
+
+### 7.3 Caching
+
+Single-resource GETs (e.g., `GET /api/customers/{id}`, `GET /api/products/{id}`, `GET /api/orders/{id}`) return an `ETag` HTTP header on the response. Clients send `If-None-Match: <etag>` on subsequent reads; the server replies `304 Not Modified` (with no body) when the resource has not changed. Collection endpoints (`GET /api/customers/{id}/orders`, `GET /api/orders/overdue`) do **not** emit `ETag` and do not honor `If-None-Match`.
 
 ## 8. Persistence
 

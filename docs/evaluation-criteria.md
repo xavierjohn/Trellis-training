@@ -69,7 +69,7 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **DI extension per layer** | Each layer has one DI extension method, wired in Program.cs | 10 = all match, <7 = template unclear |
 | **Endpoint paths match** | All 16 endpoints exist with correct HTTP methods and paths | 10 = exact match, <7 = spec needs detail |
 | **API versioning configured** | Asp.Versioning with namespace convention, versioned controller folders | 10 = all present, <7 = needs emphasis |
-| **Problem Details for errors** | Error responses follow RFC 7807 format (emitted by Trellis.Asp) | 10 = all use it, <7 = Trellis.Asp gap |
+| **Problem Details for errors** | Error responses follow Problem Details per RFC 9457 (compatible with the legacy RFC 7807 shape), emitted by `Trellis.Asp` | 10 = all use it, <7 = Trellis.Asp gap |
 | **201 for creation with Location** | POST /customers and POST /orders return 201 with Location header generated via `CreatedAtRoute` (AOT-safe; named `[HttpGet(..., Name = "...")]` route) — including the `api-version` route value | 10 = all correct, <7 = needs pattern |
 | **Health check endpoint** | /health endpoint present | 10 = all present, <7 = needs emphasis |
 | **DTOs in Api layer** | Request/Response types in versioned Models/ folder (e.g., `Api/src/{version}/Models/`), not domain types | 10 = all correct, <7 = needs example |
@@ -295,7 +295,7 @@ The Level 6 criteria specifically measure whether the architecture and copilot i
 | `Trellis.Primitives.Generator` | Source-generated TryCreate, equality, JSON converters for value objects |
 | `Trellis.StateMachine` | Order state machine with Result-returning FireResult |
 | `Trellis.Analyzers` | Compile-time ROP correctness checks |
-| `Trellis.Asp` | `ToHttpResponseAsync(...).AsActionResultAsync<T>()` for MVC, `CreatedAtRoute` for 201+Location, RFC 7807 Problem Details, scalar value binding, ETag/precondition support |
+| `Trellis.Asp` | `ToHttpResponseAsync(...).AsActionResultAsync<T>()` for MVC, `CreatedAtRoute` for 201+Location, Problem Details per RFC 9457 (compatible with the legacy RFC 7807 shape), scalar value binding, ETag/precondition support |
 | `Trellis.Authorization` | Actor, IActorProvider, IAuthorize (permissions), IAuthorizeResource (cancel ownership) |
 | `Trellis.Mediator` | Commands, Queries, ValidationBehavior, AuthorizationBehavior, ResourceAuthorizationBehavior |
 | `Trellis.EntityFrameworkCore` | ApplyTrellisConventions, AddTrellisInterceptors, SaveChangesResultAsync, FirstOrDefaultMaybeAsync, .Where(spec), ScalarValueQueryInterceptor for natural VO LINQ |
