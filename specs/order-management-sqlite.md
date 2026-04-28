@@ -497,6 +497,8 @@ Submit, Approve, Ship, Deliver, and Cancel require no request body.
 
 ## 10. Testing Requirements
 
+> **Coverage bar:** the prose below summarises the test categories. The full per-row coverage matrix lives in [`coverage-checklist.md`](./coverage-checklist.md) and is the binding stop-criterion: every row in §1–§7 of the checklist must have at least one matching assertion. Stopping at "representative happy + key failure paths" is not sufficient.
+
 ### 10.1 Domain Tests
 
 Unit tests for each aggregate's business rules. No external dependencies.
