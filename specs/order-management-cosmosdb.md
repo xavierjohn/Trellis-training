@@ -139,7 +139,9 @@ The system defines the following permissions:
 | Permission | Description |
 |-----------|-------------|
 | `customers:create` | Create new customers |
+| `customers:read` | View customers |
 | `products:create` | Create new products |
+| `products:read` | View products |
 | `products:manage-stock` | Add stock to products |
 | `orders:create` | Create draft orders and manage line items |
 | `orders:submit` | Submit draft orders |
@@ -156,8 +158,8 @@ Roles are not enforced by the system — they exist in the identity provider. Th
 
 | Role | Permissions |
 |------|------------|
-| **SalesRep** | `customers:create`, `orders:create`, `orders:submit`, `orders:cancel`, `orders:read` |
-| **WarehouseManager** | `products:create`, `products:manage-stock`, `orders:approve`, `orders:ship`, `orders:deliver`, `orders:read-all` |
+| **SalesRep** | `customers:create`, `customers:read`, `orders:create`, `orders:submit`, `orders:cancel`, `orders:read` |
+| **WarehouseManager** | `products:create`, `products:read`, `products:manage-stock`, `orders:approve`, `orders:ship`, `orders:deliver`, `orders:read-all` |
 | **Admin** | All permissions |
 
 ### 5.3 Permission Checks
@@ -195,7 +197,14 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the created Customer.
 - **Failure:** Validation error → 422. Duplicate email → 409.
 
-### 6.2 Create Product (Command)
+### 6.2 Get Customer (Query)
+
+- **Permission required:** `customers:read`
+- **Input:** customerId
+- **Success:** Returns the Customer.
+- **Failure:** Customer not found → 404.
+
+### 6.3 Create Product (Command)
 
 - **Permission required:** `products:create`
 - **Input:** productName, sku, unitPrice
@@ -203,7 +212,14 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the created Product.
 - **Failure:** Validation error → 422. Duplicate SKU → 409.
 
-### 6.3 Add Stock (Command)
+### 6.4 Get Product (Query)
+
+- **Permission required:** `products:read`
+- **Input:** productId
+- **Success:** Returns the Product.
+- **Failure:** Product not found → 404.
+
+### 6.5 Add Stock (Command)
 
 - **Permission required:** `products:manage-stock`
 - **Input:** productId, quantity
@@ -211,7 +227,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns updated Product.
 - **Failure:** Validation error → 422. Product not found → 404.
 
-### 6.4 Create Draft Order (Command)
+### 6.6 Create Draft Order (Command)
 
 - **Permission required:** `orders:create`
 - **Input:** customerId, list of (productId, quantity)
@@ -220,7 +236,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the created Order in Draft status.
 - **Failure:** Validation error → 422. Customer or product not found → 404.
 
-### 6.5 Add Line Item to Draft Order (Command)
+### 6.7 Add Line Item to Draft Order (Command)
 
 - **Permission required:** `orders:create`
 - **Input:** orderId, productId, quantity
@@ -229,7 +245,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the updated Order with the new line item.
 - **Failure:** Validation error (not Draft, duplicate product, invalid quantity) → 400. Order or product not found → 404.
 
-### 6.6 Remove Line Item from Draft Order (Command)
+### 6.8 Remove Line Item from Draft Order (Command)
 
 - **Permission required:** `orders:create`
 - **Input:** orderId, lineItemId
@@ -237,7 +253,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the updated Order without the removed line item.
 - **Failure:** Order not in Draft or cannot remove last line item → 422. Order or line item not found → 404.
 
-### 6.7 Submit Order (Command)
+### 6.9 Submit Order (Command)
 
 - **Permission required:** `orders:submit`
 - **Input:** orderId
@@ -245,7 +261,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the Order in Submitted status.
 - **Failure:** Invalid transition or insufficient stock → 422. Order not found → 404.
 
-### 6.8 Approve Order (Command)
+### 6.10 Approve Order (Command)
 
 - **Permission required:** `orders:approve`
 - **Input:** orderId
@@ -253,7 +269,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the Order in Approved status.
 - **Failure:** Invalid transition → 422. Order not found → 404.
 
-### 6.9 Ship Order (Command)
+### 6.11 Ship Order (Command)
 
 - **Permission required:** `orders:ship`
 - **Input:** orderId
@@ -261,7 +277,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the Order in Shipped status.
 - **Failure:** Invalid transition → 422. Order not found → 404.
 
-### 6.10 Deliver Order (Command)
+### 6.12 Deliver Order (Command)
 
 - **Permission required:** `orders:deliver`
 - **Input:** orderId
@@ -269,7 +285,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the Order in Delivered status.
 - **Failure:** Invalid transition → 422. Order not found → 404.
 
-### 6.11 Cancel Order (Command with Ownership Check)
+### 6.13 Cancel Order (Command with Ownership Check)
 
 - **Permission required:** `orders:cancel`
 - **Ownership check:** Actor must be the order creator OR have `orders:read-all` permission
@@ -278,14 +294,14 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the Order in Cancelled status.
 - **Failure:** Forbidden (not owner and not admin) → 403. Invalid transition → 422. Order not found → 404.
 
-### 6.12 Get Order by ID (Query)
+### 6.14 Get Order by ID (Query)
 
 - **Permission required:** `orders:read`
 - **Input:** orderId
 - **Success:** Returns the Order.
 - **Failure:** Order not found → 404.
 
-### 6.13 List Orders by Customer (Query)
+### 6.15 List Orders by Customer (Query)
 
 - **Permission required:** `orders:read-all`
 - **Input:** customerId
@@ -293,7 +309,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Success:** Returns the list of Orders belonging to the Customer.
 - **Failure:** Customer not found → 404.
 
-### 6.14 List Overdue Orders (Query)
+### 6.16 List Overdue Orders (Query)
 
 - **Permission required:** `orders:read-all`
 - **Definition:** An order is overdue if it has been in Submitted status for more than 7 days without being Approved.
@@ -504,7 +520,7 @@ Handler tests with mocked repositories.
 
 ### 10.3 API Integration Tests
 
-HTTP round-trip tests using a test web application factory with SQLite in-memory.
+HTTP round-trip tests using a test web application factory backed by the Cosmos emulator OR a fake repository layer (`AddSingleton<I*Repository, FakeRepository<,>>()` in `WebApplicationFactory`) when the emulator is unavailable.
 
 - Create customer → 201 with Location header
 - Duplicate email → 409 with Problem Details
