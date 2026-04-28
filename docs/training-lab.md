@@ -8,7 +8,7 @@
 - .NET 10 SDK installed
 - VS Code or Visual Studio
 - Docker Desktop (optional — for Aspire Dashboard telemetry viewer)
-- Trellis ASP template installed (`dotnet new install Trellis.AspTemplate::1.0.13-alpha`)
+- Trellis ASP template installed (`dotnet new install Trellis.AspTemplate`)
 - Basic understanding of C# and web APIs
 
 ---
@@ -49,7 +49,7 @@ docker ps --format "table {{.Image}}\t{{.Ports}}\t{{.Status}}"
 1. Install the Trellis template (first time only — skip if already installed):
 
 ```bash
-dotnet new install Trellis.AspTemplate::1.0.13-alpha
+dotnet new install Trellis.AspTemplate
 ```
 
 2. Scaffold the project:
@@ -60,7 +60,7 @@ dotnet new trellis-asp -n OrderManagement --authorName "Your Name"
 
 This creates the full solution structure including:
 - `.github/copilot-instructions.md` — Trellis conventions for AI
-- `.github/trellis-api-reference.md` — Complete Trellis API surface reference
+- `.github/trellis-api-*.md` — Per-package Trellis API surface reference
 - All project files, build system (`Directory.Build.props`, `Directory.Packages.props`, `build/test.props`), and test infrastructure
 - `.gitignore` configured for .NET/Visual Studio
 - Working sample code (Todo) replaced with your service name
@@ -81,7 +81,7 @@ git add -A
 git commit -m "Scaffold with Trellis template"
 ```
 
-> **Why this approach?** The `dotnet new` template handles all scaffolding — project structure, build system, package references, global usings, and DI wiring. This eliminates token waste on boilerplate and ensures the AI focuses exclusively on implementing business logic. The copilot instructions (`.github/copilot-instructions.md`) tell the AI *how* to build with Trellis, and the API reference (`.github/trellis-api-reference.md`) gives it the full type surface.
+> **Why this approach?** The `dotnet new` template handles all scaffolding — project structure, build system, package references, global usings, and DI wiring. This eliminates token waste on boilerplate and ensures the AI focuses exclusively on implementing business logic. The copilot instructions (`.github/copilot-instructions.md`) tell the AI *how* to build with Trellis, and the per-package API references (`.github/trellis-api-*.md`) give it the full type surface.
 
 ---
 
@@ -132,9 +132,8 @@ Before sending requests, verify the generated service replaced the template's sa
 - Integration tests and `WebApplicationFactory` helpers target the generated host, base URL, route prefixes, and actor headers.
 - Namespace/versioning/ProblemDetails metadata names the generated service, not the template sample.
 - Any OpenAPI/Scalar examples or README snippets match the generated routes and DTO names.
-- If the spec expects validation failures to return `400 Bad Request`, the app must override Trellis's default `Error.UnprocessableContent` mapping. By default, Trellis maps `Error.UnprocessableContent` to `422 Unprocessable Content`.
 
-Use the `.http` file with the [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension in VS Code. The smoke test should cover:
+Use the `.http` filewith the [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension in VS Code. The smoke test should cover:
 
 1. **Create a customer** (as SalesRep) → expect `201 Created` with Location header
 2. **Create a customer without phone** → expect `201 Created`, PhoneNumber absent/null
@@ -225,14 +224,14 @@ Paste this into Copilot Chat as a follow-up prompt (in the same conversation tha
 > **API changes:**
 > - Add endpoint: `POST /api/orders/{id}/return` with body `{ "reason": "..." }`
 > - Returns 200 OK with updated order on success
-> - Returns 400 if return window expired or invalid transition
+> - Returns 422 if return window expired or invalid transition
 > - Returns 404 if order not found
 > - Returns 403 if missing permission
 >
 > **Test changes:**
 > - Domain: return within window succeeds, return after 30 days fails, return from non-Delivered status fails, stock released on return
 > - Application: handler happy path, missing permission
-> - API: HTTP round-trip for successful return, 400 for expired window
+> - API: HTTP round-trip for successful return, 422 for expired window
 >
 > **EF changes:**
 > - Add `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTime>` properties on Order — the source generator and `MaybeConvention` handle persistence automatically
@@ -243,7 +242,7 @@ This exercise specifically validates that:
 
 | What | Why It Matters |
 |------|---------------|
-| **State machine modification** | Can the AI add a new status + transition to an existing Stateless machine without breaking existing transitions? |
+| **State machine modification** | Can the AI add a new status + transition to an existing `Trellis.StateMachine` without breaking existing transitions? |
 | **New value object** | Does the source generator pattern hold for additions? |
 | **Aggregate modification** | Can the AI add properties and methods to an existing aggregate? |
 | **Stock release reuse** | Does the AI recognize that return stock release is the same pattern as cancel? |
@@ -309,7 +308,7 @@ You've built a complete enterprise service and evolved it with a new feature. Yo
 To use this guide as a consistency eval for Trellis:
 
 1. **Start 10 fresh sessions** — new repo, new Copilot conversation each time.
-2. **Follow Steps 1–7 identically** in each session.
+2. **Follow Steps 1–8 identically** in each session.
 3. **After each session,** score the output against the [Evaluation Criteria](evaluation-criteria.md).
 4. **Record scores** in the tracking table.
 5. **Identify lowest-scoring criteria** — these are gaps in Trellis or the Copilot Instructions.

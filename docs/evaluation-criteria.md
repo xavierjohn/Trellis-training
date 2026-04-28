@@ -14,7 +14,7 @@ These must be identical across all 10 runs. If any vary, it indicates a missing 
 | **Value objects use TryCreate** | All value objects use static TryCreate returning Result\<T\> | 10/10 identical |
 | **Aggregates inherit correctly** | Customer, Product, Order extend Aggregate\<TId\> | 10/10 identical |
 | **Line items are entities** | LineItem extends Entity\<LineItemId\> | 10/10 identical |
-| **State machine uses Stateless** | Order status transitions configured via Stateless with FireResult | 10/10 identical |
+| **State machine uses Trellis.StateMachine** | Order status transitions configured via `Trellis.StateMachine` with `FireResult` | 10/10 identical |
 | **State transitions return Result** | Fire operations return Result\<Order\>, not void/throw | 10/10 identical |
 | **Domain events defined** | All 5 events from spec exist as classes/records | 10/10 identical |
 | **Specification exists** | OverdueOrderSpec implements Specification\<Order\> | 10/10 identical |
@@ -29,7 +29,10 @@ These must be identical across all 10 runs. If any vary, it indicates a missing 
 | **build/test.props shared** **(T)** | `build/test.props` exists. No `GlobalUsings.cs` in test projects. | 10/10 identical |
 | **No primitive obsession** | grep for raw Guid, raw string parameters in domain methods returns zero hits | 10/10 identical |
 | **Handlers return domain types** | No DTO types in Application layer — handlers return `Result<Order>`, `Result<Customer>`, etc. | 10/10 identical |
-| **Repository returns Maybe** | Repository `FindByIdAsync` returns `Maybe<T>`, not `Result<T>` — handler converts with `.ToResult(Error.NotFound(...))` | 10/10 identical |
+| **Repository returns Maybe** | Repository `FindByIdAsync` returns `Maybe<T>`, not `Result<T>` — handler converts with `.ToResult(new Error.NotFound(new ResourceRef("Type", id.ToString(InvariantCulture))))` | 10/10 identical |
+| **No `Result<Unit>`** | Void-returning operations use non-generic `Result`, never `Result<Unit>`. `grep -rn 'Result<Unit>' Domain/src Application/src` returns 0 hits | 10/10 identical |
+| **Errors constructed as records** | All `Error.NotFound`/`Error.Conflict`/`Error.Forbidden`/`Error.UnprocessableContent` instances use `new Error.X(...)` record construction (no static factory calls) | 10/10 identical |
+| **`ResourceRef` used for NotFound** | `new Error.NotFound(new ResourceRef("Type", id.ToString(InvariantCulture)))` — not a freeform string message | 10/10 identical |
 
 ### Level 2: Behavioral Consistency (Scored)
 
@@ -42,7 +45,7 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **Line item price snapshot** | UnitPrice captured from product at creation, not referenced live | 10 = all correct, <7 = needs pattern |
 | **Duplicate product in order** | Adding same product to order is rejected | 10 = all handle it, <7 = spec ambiguity |
 | **Last line item protection** | Cannot remove last line item from order | 10 = all enforce, <7 = needs pattern |
-| **Error types match** | ValidationError, NotFoundError, ConflictError, ForbiddenError used correctly per spec | 10 = all match, <7 = error taxonomy issue |
+| **Error types match** | `Error.UnprocessableContent`, `Error.NotFound`, `Error.Conflict`, `Error.Forbidden` (nested records) used correctly per spec; validation failures map to 422, not 400 | 10 = all match, <7 = error taxonomy issue |
 | **Order total computed** | Order total calculated as sum of (quantity × unitPrice) | 10 = all compute, <7 = needs guidance |
 | **Overdue spec correct** | Spec checks Submitted status + 7-day threshold, translatable to SQL | 10 = all correct, <7 = spec clarity |
 | **IDs use RequiredGuid with V7** | All identity types use RequiredGuid with Guid.CreateVersion7() | 10 = all correct, <7 = needs guidance |
@@ -50,8 +53,10 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **ParallelAsync for draft order** | CreateDraftOrder fetches customer and products in parallel | 10 = all use ParallelAsync, <7 = needs example |
 | **Cancel resource auth check** | CancelOrderCommand checks actor == owner OR admin | 10 = all correct, <7 = needs pattern |
 | **SaveChangesResultAsync used** | Repositories use SaveChangesResultAsync, not bare SaveChangesAsync | 10 = all correct, <7 = needs guidance |
-| **Result.Ensure for auth** | Resource authorization uses `Result.Ensure(condition, Error.Forbidden(...))` instead of ternary | 10 = all correct, <7 = needs pattern |
+| **Result.Ensure for auth** | Resource authorization uses `Result.Ensure(condition, new Error.Forbidden(...))` instead of ternary | 10 = all correct, <7 = needs pattern |
 | **Natural VO in specs** | Specifications use `order.SubmittedAt < cutoff` without `.Value` | 10 = all correct, <7 = needs interceptor guidance |
+| **Field-level validation uses `ForField`** | Field-level validation errors use `Error.UnprocessableContent.ForField(field, code, message)` — not freeform string messages | 10 = all correct, <7 = needs pattern |
+| **`Map` arity matches source** | `Map(() => ...)` (parameterless) on non-generic `Result` source; `Map(value => ...)` on `Result<T>` source. TRLS analyzer flags `Map(_ => ...)` on non-generic source | 10 = all correct, <7 = analyzer-output ignored |
 
 ### Level 3: Architecture & API Consistency (Scored)
 
@@ -60,19 +65,22 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **Clean architecture layers** | Four projects with correct dependency direction | 10 = all match, <7 = needs guidance |
 | **Domain has no external deps** | Domain .csproj references only Trellis packages and .NET runtime | 10 = all clean, <7 = dependency violation |
 | **Pipeline behaviors registered** | Mediator registered with pipeline behaviors from Trellis.Mediator | 10 = all correct, <7 = needs guidance |
-| **IActorProvider registered** | TestActorProvider registered, reads X-Test-Actor header | 10 = all correct, <7 = needs pattern |
+| **IActorProvider registered** | `AddDevelopmentActorProvider()` registered in DI for development (reads `X-Test-Actor` header). Integration tests use `factory.CreateClientWithActor(...)` helpers from `Trellis.Testing.AspNetCore` | 10 = all correct, <7 = needs pattern |
 | **DI extension per layer** | Each layer has one DI extension method, wired in Program.cs | 10 = all match, <7 = template unclear |
 | **Endpoint paths match** | All 16 endpoints exist with correct HTTP methods and paths | 10 = exact match, <7 = spec needs detail |
 | **API versioning configured** | Asp.Versioning with namespace convention, versioned controller folders | 10 = all present, <7 = needs emphasis |
-| **Problem Details for errors** | Error responses follow RFC 9457 format | 10 = all use it, <7 = Trellis.Asp gap |
-| **201 for creation with Location** | POST /customers and POST /orders return 201 with Location header | 10 = all correct, <7 = needs pattern |
+| **Problem Details for errors** | Error responses follow RFC 7807 format (emitted by Trellis.Asp) | 10 = all use it, <7 = Trellis.Asp gap |
+| **201 for creation with Location** | POST /customers and POST /orders return 201 with Location header generated via `CreatedAtRoute` (AOT-safe; named `[HttpGet(..., Name = "...")]` route) — including the `api-version` route value | 10 = all correct, <7 = needs pattern |
 | **Health check endpoint** | /health endpoint present | 10 = all present, <7 = needs emphasis |
 | **DTOs in Api layer** | Request/Response types in versioned Models/ folder (e.g., `Api/src/{version}/Models/`), not domain types | 10 = all correct, <7 = needs example |
 | **EF Core entity configurations** | IEntityTypeConfiguration classes in Acl | 10 = all correct, <7 = needs guidance |
 | **EnsureCreated on startup** | Database created via `EnsureCreated()` in development mode, no EF Core migrations | 10 = all correct, <7 = needs instruction |
 | **api.http updated** | Template api.http replaced with requests covering all 16 endpoints, correct api-version, X-Test-Actor headers, happy path + error examples | 10 = all endpoints, <7 = still has scaffold defaults |
-| **api.http playback passes** | All api.http requests execute successfully against the running service: happy-path requests return expected status codes (201, 200), error-path requests return expected error codes (400, 409, 403, 404). No requests fail due to invalid test data (e.g., SKU format mismatches, wrong field names). | 10 = all pass, <7 = some requests fail |
+| **api.http playback passes** | All api.http requests execute successfully against the running service: happy-path requests return expected status codes (201, 200), error-path requests return expected error codes (422, 409, 403, 404). 400 is reserved for framework-level errors (e.g., missing `api-version`). No requests fail due to invalid test data (e.g., SKU format mismatches, wrong field names). | 10 = all pass, <7 = some requests fail |
 | **AddTrellisInterceptors** | `AddTrellisInterceptors()` called in DbContext options for natural VO LINQ support | 10 = all correct, <7 = needs guidance |
+| **MVC bridge uses `AsActionResultAsync`** | Controllers use `ToHttpResponseAsync(body, opts).AsActionResultAsync<T>()` (or return `IResult` directly) — never v1 `ToActionResultAsync(this, ...)` | 10 = all correct, <7 = v1 pattern leakage |
+| **OpenAPI declares 422 for validation** | Commands that can fail validation declare `[ProducesResponseType(422)]` (not 400) — matches `Error.UnprocessableContent` → 422 mapping in `TrellisAspOptions` | 10 = all correct, <7 = OpenAPI metadata stale |
+| **Named route attribute on GetById** | GetById action declares `[HttpGet("{id}", Name = "<Resource>_GetById")]` so `CreatedAtRoute("<Resource>_GetById", ...)` is AOT-safe | 10 = all correct, <7 = relies on `CreatedAtAction` (AOT-unsafe) |
 
 ### Level 4: Test Consistency (Scored)
 
@@ -115,7 +123,19 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **Domain event raised** | `OrderReturnedEvent` with OrderId, CustomerId, ReturnReason, ReturnedAt | 10 = all present, <7 = event pattern gap |
 | **Return tests exist** | Domain + API tests for valid return, expired window, invalid status | 10 = all present, <7 = test modification gap |
 
-## How to Score
+## Scoring Modes
+
+This rubric supports two distinct scoring modes. The mode used must be stated in the run report.
+
+### Single-Run Model Score (operator default)
+
+Each criterion is scored Pass / Fail for a **single** end-to-end run. The model's score is the count of passed criteria out of 83. Pass bar **76/83**. This is the mode used by `eval-runs/README.md` for head-to-head model comparison.
+
+### 10-Run Consistency Score (research mode)
+
+Each criterion is scored across **10 independent runs** of the same model. A criterion *counts* toward the level score only if its consistency is **≥ 7/10**. The model's score is the count of qualifying criteria out of 83. This mode measures how reliably the framework + Copilot Instructions constrain the model — the steps below describe this mode.
+
+## How to Score (10-Run Consistency Mode)
 
 ### Step 1: Build the Scorecard
 
@@ -223,33 +243,27 @@ Level score = number of criteria in that level with consistency ≥ 7
 
 | Level | Criteria Count | Score Range |
 |-------|---------------|-------------|
-| L1: Structural | 20 | 0–20 |
-| L2: Behavioral | 15 | 0–15 |
-| L3: Architecture & API | 16 | 0–16 |
+| L1: Structural | 23 | 0–23 |
+| L2: Behavioral | 17 | 0–17 |
+| L3: Architecture & API | 19 | 0–19 |
 | L4: Tests | 9 | 0–9 |
 | L5: Feedback | 4 | 0–4 |
-| L6: Feature Addition | 10 | 0–10 |
-| **Total** | **74** | **0–74** |
+| L6: Feature Addition | 11 | 0–11 |
+| **Total** | **83** | **0–83** |
 
 ### Step 5: Record in Tracking Table
 
-| Date | Trellis Version | AI Model | L1 (/20) | L2 (/15) | L3 (/16) | L4 (/9) | L5 (/4) | L6 (/10) | Total (/74) | Notes |
+| Date | Trellis Version | AI Model | L1 (/23) | L2 (/17) | L3 (/19) | L4 (/9) | L5 (/4) | L6 (/11) | Total (/83) | Notes |
 |------|----------------|----------|----------|---------|----------|---------|---------|----------|-------------|-------|
-| 2026-03-28 | 3.0.0-alpha.137 | Claude Opus 4.6 | — | — | — | — | 4/4 | — | — | 81 tests, 27 min, 4 FPs |
-| 2026-03-28 | 3.0.0-alpha.137 | GPT-5.4 | — | — | — | — | 4/4 | — | — | 81 tests, 42 min, 4 FPs |
-| 2026-03-28 | 3.0.0-alpha.137 | Claude Sonnet 4.6 | — | — | — | — | 4/4 | — | — | 78 tests, 83 min, 5 pain points |
+| _(awaiting first v2 evaluation run)_ | | | | | | | | | | |
 
-> **Note:** L1–L4, L6 require 10 runs to score consistency. These 3 runs are a single-pass validation.
-> All 3 models: build 0 errors/0 warnings, all tests pass, feedback file generated.
+> **Note:** L1–L4, L6 require 10 runs to score consistency.
 
 ### Recurring Friction Points (across models)
 
 | Issue | Models Hit | Priority |
 |-------|-----------|----------|
-| Money in request DTOs — need MoneyDto pattern | GPT-5.4, Sonnet | Document MoneyDto pattern in copilot instructions |
-| TRLS001 `_ = result` workaround not obvious | Opus, Sonnet | Document in copilot instructions for test code |
-| `[CustomerResourceId]` attribute undiscoverable | Sonnet | Document or replace with `[FromRoute]` |
-| RequiredEnum handled by ApplyTrellisConventions — no HasConversion needed | GPT-5.4 | Clarify in copilot instructions |
+| _(awaiting first v2 evaluation run)_ | | |
 
 ### Step 6: Identify What to Fix
 
@@ -265,9 +279,10 @@ Sort all criteria by consistency score, lowest first:
 
 ### The Goal
 
-**Total score of 68+ out of 74** — meaning at least 68 of the 74 criteria achieve 7+/10 consistency across independent AI runs.
+**Single-run mode pass bar: 76+/83.**
+**10-run consistency pass bar: 76+/83** — meaning at least 76 of the 83 criteria achieve 7+/10 consistency across independent AI runs.
 
-The Level 6 criteria specifically measure whether the architecture and copilot instructions support **incremental change** — the most important real-world capability. A model that scores 61/61 on L1–L5 but can't modify the codebase without regressions isn't production-ready.
+The Level 6 criteria specifically measure whether the architecture and copilot instructions support **incremental change** — the most important real-world capability. A model that scores 70/72 on L1–L5 but can't modify the codebase without regressions isn't production-ready.
 
 ---
 
@@ -275,14 +290,14 @@ The Level 6 criteria specifically measure whether the architecture and copilot i
 
 | Package | How It's Exercised |
 |---------|--------------------|
-| `Trellis.Results` | Result\<T\> on every operation, Maybe\<T\> for optionals, error types, Combine, Bind, Map, Tap, Match, MatchError, ParallelAsync |
+| `Trellis.Core` | Result\<T\> on every operation, Maybe\<T\> for optionals, typed `Error` records, Combine, Bind, Map, Tap, Match, MatchError, ParallelAsync; Aggregate\<T\>, Entity\<T\>, Specification\<T\>, domain events |
 | `Trellis.Primitives` | RequiredString, RequiredGuid (V7), RequiredInt, RequiredDecimal, RequiredEnum, EmailAddress, PhoneNumber |
 | `Trellis.Primitives.Generator` | Source-generated TryCreate, equality, JSON converters for value objects |
-| `Trellis.DomainDrivenDesign` | Aggregate\<T\>, Entity\<T\>, Specification\<T\>, domain events |
-| `Trellis.Stateless` | Order state machine with Result-returning FireResult |
+| `Trellis.StateMachine` | Order state machine with Result-returning FireResult |
 | `Trellis.Analyzers` | Compile-time ROP correctness checks |
-| `Trellis.Asp` | ToActionResult(this), ToCreatedAtActionResult for 201+Location, Problem Details, scalar value binding |
+| `Trellis.Asp` | `ToHttpResponseAsync(...).AsActionResultAsync<T>()` for MVC, `CreatedAtRoute` for 201+Location, RFC 7807 Problem Details, scalar value binding, ETag/precondition support |
 | `Trellis.Authorization` | Actor, IActorProvider, IAuthorize (permissions), IAuthorizeResource (cancel ownership) |
 | `Trellis.Mediator` | Commands, Queries, ValidationBehavior, AuthorizationBehavior, ResourceAuthorizationBehavior |
 | `Trellis.EntityFrameworkCore` | ApplyTrellisConventions, AddTrellisInterceptors, SaveChangesResultAsync, FirstOrDefaultMaybeAsync, .Where(spec), ScalarValueQueryInterceptor for natural VO LINQ |
-| `Trellis.Testing` | `.Should().BeSuccess()`, `.Should().BeFailure()`, `.Should().BeFailureOfType<T>()`, `.Should().HaveValue()`, `.Should().BeNone()`, `FakeRepository`, `ResultBuilder`, `ValidationErrorBuilder` |
+| `Trellis.Testing` | `.Should().BeSuccess()`, `.Should().BeFailure()`, `.Should().BeFailureOfType<T>()`, `.Should().HaveValue()`, `.Should().BeNone()`, `FakeRepository`, `TestActorProvider`, `TestActorScope`, `AggregateTestMutator`, `UnwrapExtensions` |
+| `Trellis.Testing.AspNetCore` | `WebApplicationFactoryExtensions` (HTTP-test helpers), `HttpFileRunner` for replaying `.http` files, MSAL test token + actor-header plumbing |
