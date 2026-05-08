@@ -147,8 +147,9 @@ trellis-training/
 │       ├── scalar-api-docs.png        # Scalar API screenshot
 │       └── rop-pipeline.png           # ROP chain visualization
 └── specs/
-    ├── order-management-sqlite.md     # Business spec — SQLite/EF Core
-    ├── order-management-cosmosdb.md   # Business spec — CosmosDB variant
+    ├── order-management-sqlite.md     # Business spec (v1) — SQLite/EF Core
+    ├── order-management-cosmosdb.md   # Business spec (v1) — CosmosDB variant
+    ├── order-management-returns-v2.md # Step 8 (Returns) — v2 delta SDD, storage-agnostic
     ├── coverage-checklist.md          # v1 binding test-coverage checklist
     └── coverage-checklist-returns.md  # Step 8 (Returns) coverage delta
 ```

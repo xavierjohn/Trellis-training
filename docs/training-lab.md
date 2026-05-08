@@ -15,9 +15,17 @@
 
 ## Step 1: Create a Project Directory
 
+Create lab runs under `C:\GitHub\Trellis-lab-runs` using this folder shape:
+
+```text
+C:\GitHub\Trellis-lab-runs\<model-or-run-name>\OrderManagement
+```
+
+Use the model name plus date for normal runs, for example `gpt-5.5-2026-05-06\OrderManagement`. For repeated runs of the same model, use the existing `runN-<model>` pattern, for example `run5-gpt-5.5\OrderManagement`.
+
 ```bash
-mkdir OrderManagement
-cd OrderManagement
+mkdir C:\GitHub\Trellis-lab-runs\gpt-5.5-2026-05-06\OrderManagement
+cd C:\GitHub\Trellis-lab-runs\gpt-5.5-2026-05-06\OrderManagement
 git init
 ```
 
@@ -194,17 +202,26 @@ git commit -m "Add Trellis feedback"
 
 A new business rule has been approved: **customers can return delivered orders within 30 days.**
 
+> **Attach `specs/order-management-returns-v2.md` to the chat as `RETURNS-V2.md`** (paperclip icon — keep the v1 `SPEC.md` attached too). That delta SDD is the binding source of truth for this step: it introduces the new API version `2026-12-01`, the new endpoint, the v2 response shape, the v1-projection rule for returned orders, the Location-header round-trip rule, and the authorization scoping. The narrative below summarises the change for prompting; defer to `RETURNS-V2.md` whenever they disagree.
+
 Paste this into Copilot Chat as a follow-up prompt (in the same conversation that built the service):
 
 > **New requirement: Order Returns**
 >
-> Customers can now return delivered orders. Add the following to the existing Order Management service:
+> Customers can now return delivered orders. Implement the delta described in `RETURNS-V2.md` on top of the existing service:
+>
+> **Scope reminder (full rules in `RETURNS-V2.md`):**
+> - Ships under a new API version `2026-12-01`. The existing 16 endpoints from Steps 1–7 stay on `2026-11-12` AND must also be served under `2026-12-01`.
+> - `POST /api/orders/{id}/return` is v2-only. Calling it under `?api-version=2026-11-12` returns 404.
+> - v1 response shape is unchanged: no `returnReason`/`returnedAt`, returned orders project as `status: "Delivered"`. v2 response adds `returnReason` and `returnedAt` and exposes `status: "Returned"`.
+> - `Location` headers round-trip the requested api-version. Do not hardcode a version.
+> - `orders:return` is required only for the new endpoint, not for v1 operations served under v2.
 >
 > **Domain changes:**
 > - Add `Returned` to the OrderStatus enum
 > - Add a `ReturnReason` value object — required string, 10–500 characters
-> - Add `ReturnReason` as a property on the Order aggregate (absent until returned, persisted to database, included in API responses)
-> - Add `ReturnedAt` as a `Maybe<DateTime>` property on Order (set during Return transition)
+> - Add `ReturnReason` as a property on the Order aggregate (absent until returned, persisted to database, included in API responses **on v2 only**)
+> - Add `ReturnedAt` as a `Maybe<DateTime>` property on Order (set during Return transition; included in API responses **on v2 only**)
 > - (`DeliveredAt` is already a base property — set during the Shipped → Delivered transition. Do not redefine it.)
 > - Add state transition: `Delivered → Returned`
 >   - Precondition: Order must have been delivered within the last 30 days. **Use the injected `TimeProvider`** (do not call `DateTime.UtcNow`). Valid when `now - DeliveredAt <= TimeSpan.FromDays(30)`; invalid when greater than 30 days. Both `now` and `DeliveredAt` are UTC instants from `TimeProvider`.
@@ -223,30 +240,19 @@ Paste this into Copilot Chat as a follow-up prompt (in the same conversation tha
 > - SalesRep role gets `orders:return` permission
 >
 > **API changes:**
-> - Add endpoint: `POST /api/orders/{id}/return` with body `{ "reason": "..." }`
-> - Returns 200 OK with updated order on success
-> - Returns 422 if return window expired or invalid transition
-> - Returns 404 if order not found
-> - Returns 403 if missing `orders:return` permission OR if the actor is not the order creator and not admin
->
-> **Updated Order Response (Step 8 delta):** in addition to the v1 fields, the Order Response now includes:
-> ```json
-> {
->   "status": "Draft | Submitted | Approved | Shipped | Delivered | Cancelled | Returned",
->   "returnReason": "string | null",
->   "returnedAt": "timestamp | null"
-> }
-> ```
+> - Add endpoint: `POST /api/orders/{id}/return` with body `{ "reason": "..." }`, accessible only on `?api-version=2026-12-01` (see `RETURNS-V2.md` §3.1)
+> - Status codes: 200 OK on success, 422 on window expired/invalid transition, 403 on missing permission or non-owner non-admin, 404 on order not found OR called under `?api-version=2026-11-12`
 >
 > **Test changes:**
 > - Domain: return within window succeeds, return at exactly 30 days succeeds (boundary inclusive), return after 30 days fails, return from non-Delivered status fails, stock released on return
 > - Application: handler happy path, missing permission, non-owner non-admin → 403, owner succeeds, admin succeeds
-> - API: HTTP round-trip for successful return, 422 for expired window, 403 for non-owner
+> - API (Step 8 endpoint): HTTP round-trip for successful return, 422 for expired window, 403 for non-owner
+> - API (multi-version regression): every v1 endpoint must work under both `?api-version=2026-11-12` and `?api-version=2026-12-01`. v2 returns the new fields; v1 must NOT include them. `POST /api/orders/{id}/return?api-version=2026-11-12` returns 404. Location headers round-trip the requested api-version.
 >
-> **EF changes:**
-> - SQLite/EF: add `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTime>` properties on Order — the source generator and `MaybeConvention` handle persistence automatically. (Cosmos: serialize via the Cosmos SDK; nullable JSON properties for `Maybe<T>`.)
+> **Storage changes:**
+> - SQLite/EF: add `ReturnedAt` as a `partial Maybe<DateTime>` property on Order — the source generator and `MaybeConvention` handle persistence automatically. Persist `ReturnReason` via the existing value-object pattern. (Cosmos: serialize via the Cosmos SDK as nullable JSON properties.)
 >
-> **Coverage:** every row in `coverage-checklist-returns.md` must have a matching test in addition to keeping `coverage-checklist.md` green.
+> **Coverage:** every row in `coverage-checklist-returns.md` must have a matching test in addition to keeping `coverage-checklist.md` green. §R7 (Multi-version conformance) is the binding test surface for the cross-version requirements.
 
 ### What This Tests
 

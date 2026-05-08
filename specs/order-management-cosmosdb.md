@@ -110,7 +110,6 @@ The Order aggregate participates in several time-based events. This table specif
 | `SubmittedAt` | yes (`Maybe<DateTime>`) | yes | yes | `OrderSubmittedEvent` |
 | `ShippedAt` | yes (`Maybe<DateTime>`) | yes | yes | `OrderShippedEvent` |
 | `DeliveredAt` | yes (`Maybe<DateTime>`) | yes | yes | `OrderDeliveredEvent` |
-| `ReturnedAt` (Step 8) | yes (`Maybe<DateTime>`) | yes | yes | `OrderReturnedEvent` |
 | `ApprovedAt` | no | no | no | `OrderApprovedEvent` only |
 | `CancelledAt` | no | no | no | `OrderCancelledEvent` only |
 
