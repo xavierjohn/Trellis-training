@@ -95,9 +95,14 @@ git commit -m "Scaffold with Trellis template"
 
 ## Step 4: Implement the Service
 
-Open Copilot Chat. Attach `specs/order-management-sqlite.md` to the chat as `SPEC.md` (paperclip icon — don't paste the body). Then send this prompt verbatim:
+Open Copilot Chat. Attach **two files** from `specs/` to the chat (paperclip icon — don't paste the bodies):
 
-> Implement the Order Management service according to the attached SPEC.md. Replace the existing sample code (Todo) with the Order Management domain. Follow `.github/copilot-instructions.md` and `.github/trellis-api-*.md` exactly.
+1. `specs/order-management-sqlite.md` as `SPEC.md`
+2. `specs/coverage-checklist.md` as `COVERAGE.md`
+
+Then send this prompt verbatim:
+
+> Implement the Order Management service according to the attached SPEC.md. Replace the existing sample code (Todo) with the Order Management domain. Follow `.github/copilot-instructions.md` and `.github/trellis-api-*.md` exactly. Every row in COVERAGE.md must have a matching test — that file is the binding test surface, not a suggestion.
 
 **Alternate prompt (SQL Server):** If you prefer SQL Server over SQLite, add to the prompt: *"Use SQL Server instead of SQLite. Use a separate console app to apply EF Core migrations instead of applying them on web service startup."*
 
@@ -202,7 +207,12 @@ git commit -m "Add Trellis feedback"
 
 A new business rule has been approved: **customers can return delivered orders within 30 days.**
 
-> **Attach `specs/order-management-returns-v2.md` to the chat as `RETURNS-V2.md`** (paperclip icon — keep the v1 `SPEC.md` attached too). That delta SDD is the binding source of truth for this step: it introduces the new API version `2026-12-01`, the new endpoint, the v2 response shape, the v1-projection rule for returned orders, the Location-header round-trip rule, and the authorization scoping. The narrative below summarises the change for prompting; defer to `RETURNS-V2.md` whenever they disagree.
+> **Attach two files** to the chat (keep `SPEC.md` and `COVERAGE.md` from Step 4 attached too):
+>
+> 1. `specs/order-management-returns-v2.md` as `RETURNS-V2.md` — the binding delta SDD (new API version `2026-12-01`, the new endpoint, the v2 response shape, the v1-projection rule for returned orders, the Location-header round-trip rule, and the authorization scoping).
+> 2. `specs/coverage-checklist-returns.md` as `COVERAGE-RETURNS.md` — the binding test surface for the delta.
+>
+> The narrative below summarises the change for prompting; defer to `RETURNS-V2.md` whenever they disagree, and to `COVERAGE-RETURNS.md` whenever there's any question about which tests the implementation owes.
 
 Paste this into Copilot Chat as a follow-up prompt (in the same conversation that built the service):
 
@@ -252,7 +262,7 @@ Paste this into Copilot Chat as a follow-up prompt (in the same conversation tha
 > **Storage changes:**
 > - SQLite/EF: add `ReturnedAt` as a `partial Maybe<DateTime>` property on Order — the source generator and `MaybeConvention` handle persistence automatically. Persist `ReturnReason` via the existing value-object pattern. (Cosmos: serialize via the Cosmos SDK as nullable JSON properties.)
 >
-> **Coverage:** every row in `coverage-checklist-returns.md` must have a matching test in addition to keeping `coverage-checklist.md` green. §R7 (Multi-version conformance) is the binding test surface for the cross-version requirements.
+> **Coverage:** every row in `COVERAGE-RETURNS.md` must have a matching test in addition to keeping `COVERAGE.md` green. §R7 (Multi-version conformance) is the binding test surface for the cross-version requirements.
 
 ### What This Tests
 
