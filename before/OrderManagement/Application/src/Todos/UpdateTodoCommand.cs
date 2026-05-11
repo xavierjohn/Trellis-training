@@ -15,15 +15,27 @@ public sealed record UpdateTodoCommand : ICommand<Result<TodoItem>>, IAuthorize
     public DueDate DueDate { get; }
     public Maybe<Tag> Tag { get; }
 
+    /// <summary>
+    /// The ETag from the client's <c>If-Match</c> header.
+    /// <para>
+    /// Required (RFC 6585). When the array is <c>null</c>, the handler returns
+    /// <c>Error.PreconditionRequired</c> which surfaces as <c>428 Precondition Required</c>.
+    /// When provided, the handler validates it against the aggregate's current ETag
+    /// before mutation, returning <c>412 Precondition Failed</c> if stale (RFC 9110).
+    /// </para>
+    /// </summary>
+    public EntityTagValue[]? IfMatchETags { get; }
+
     /// <inheritdoc />
     public IReadOnlyList<string> RequiredPermissions { get; } = [Permissions.TodosUpdate];
 
-    private UpdateTodoCommand(TodoId todoId, Title title, DueDate dueDate, Maybe<Tag> tag)
+    private UpdateTodoCommand(TodoId todoId, Title title, DueDate dueDate, Maybe<Tag> tag, EntityTagValue[]? ifMatchETags)
     {
         TodoId = todoId;
         Title = title;
         DueDate = dueDate;
         Tag = tag;
+        IfMatchETags = ifMatchETags;
     }
 
     /// <summary>
@@ -33,11 +45,12 @@ public sealed record UpdateTodoCommand : ICommand<Result<TodoItem>>, IAuthorize
     /// <param name="title">New title.</param>
     /// <param name="dueDate">New due date (must be in the future).</param>
     /// <param name="tag">New optional tag.</param>
+    /// <param name="ifMatchETags">Optional ETags from the <c>If-Match</c> header for conditional update.</param>
     /// <param name="timeProvider">Optional time provider for testability. Defaults to <see cref="TimeProvider.System"/>.</param>
-    public static Result<UpdateTodoCommand> TryCreate(TodoId todoId, Title title, DueDate dueDate, Maybe<Tag> tag, TimeProvider? timeProvider = null) =>
+    public static Result<UpdateTodoCommand> TryCreate(TodoId todoId, Title title, DueDate dueDate, Maybe<Tag> tag, EntityTagValue[]? ifMatchETags = null, TimeProvider? timeProvider = null) =>
         Result.Ensure(dueDate > (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime,
-                Error.Validation("Due date must be in the future.", "dueDate"))
-            .Map(_ => new UpdateTodoCommand(todoId, title, dueDate, tag));
+                Error.UnprocessableContent.ForField("dueDate", "out_of_range", "Due date must be in the future."))
+            .Map(_ => new UpdateTodoCommand(todoId, title, dueDate, tag, ifMatchETags));
 }
 
 /// <summary>
@@ -52,9 +65,9 @@ public sealed class UpdateTodoCommandHandler : ICommandHandler<UpdateTodoCommand
     public async ValueTask<Result<TodoItem>> Handle(UpdateTodoCommand command, CancellationToken cancellationToken)
     {
         var maybe = await _repository.FindByIdAsync(command.TodoId, cancellationToken);
-        return await maybe
-            .ToResult(Error.NotFound($"Todo {command.TodoId} not found."))
-            .Bind(todo => todo.Update(command.Title, command.DueDate, command.Tag))
-            .CheckAsync(todo => _repository.SaveAsync(todo, cancellationToken));
+        return maybe
+            .ToResult(new Error.NotFound(new ResourceRef("Todo", command.TodoId.ToString(System.Globalization.CultureInfo.InvariantCulture))) { Detail = $"Todo {command.TodoId} not found." })
+            .RequireETag(command.IfMatchETags)
+            .Bind(todo => todo.Update(command.Title, command.DueDate, command.Tag));
     }
 }

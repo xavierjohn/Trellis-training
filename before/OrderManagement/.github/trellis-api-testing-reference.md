@@ -1,319 +1,508 @@
-# Trellis — AI Testing API Reference
-
-> This document covers the `Trellis.Testing` package: FluentAssertions extensions, test builders,
-> fake repositories, actor providers, and testing patterns for Trellis applications.
-> For the core framework API, see `trellis-api-reference.md`.
-
+﻿---
+package: Trellis.Testing
+namespaces: [Trellis.Testing]
+types: ["FakeRepository<TAggregate, TId>", "FakeSharedResourceLoader<TResource, TId>", TestActorProvider, TestActorScope, "ResultAssertions<TValue>", ResultAssertionsExtensions, ResultAssertionsAsyncExtensions, "MaybeAssertions<T>", MaybeAssertionsExtensions, ErrorAssertions, ErrorAssertionsExtensions, ValidationErrorAssertions, ValidationErrorAssertionsExtensions, UnwrapExtensions, UnwrapFailedException, AggregateTestMutator]
+version: v3
+last_verified: 2026-05-06
+audience: [llm]
 ---
+# Trellis.Testing — API Reference
 
-## Result Assertions
+- **Package:** `Trellis.Testing`
+- **Namespace:** `Trellis.Testing`
+- **Purpose:** FluentAssertions extensions, unwrap helpers, and test doubles (FakeRepository, TestActorProvider) for Trellis applications.
 
+See also: [trellis-api-cookbook.md](trellis-api-cookbook.md) — recipes using this package.
+
+> **ASP.NET Core integration test helpers** (WebApplicationFactory, DI replacement, fake time, MSAL tokens, and `.http` replay) are in a separate package: [`Trellis.Testing.AspNetCore`](trellis-api-testing-aspnetcore.md).
+
+## Use this file when
+
+- You are writing unit/handler/domain tests for Trellis `Result`, `Maybe`, errors, or mediator handlers.
+- You need FluentAssertions extensions for success/failure/error-shape assertions.
+- You need test-only unwrap helpers, fake repositories, or test actor providers.
+
+## Patterns Index
+
+| Goal | Canonical API / pattern | See |
+|---|---|---|
+| Assert a generic result succeeded | `result.Should().BeSuccess()` / `.HaveValue(...)` | [`ResultAssertions<TValue>`](#resultassertionstvalue) |
+| Assert a result failed with a specific error case | `result.Should().BeFailureOfType<TError>()` | [`ResultAssertions<TValue>`](#resultassertionstvalue) |
+| Assert error code/detail | `.HaveErrorCode(...)`, `.HaveErrorDetail(...)`, `.HaveErrorDetailContaining(...)` | [`ResultAssertions<TValue>`](#resultassertionstvalue) |
+| Extract success value in tests only | `result.Unwrap()` | [Usage notes](#usage-notes) |
+| Extract error in tests only | `result.UnwrapError()` | [Usage notes](#usage-notes) |
+| Provide an actor in handler tests | `TestActorProvider` | [`TestActorProvider`](#testactorprovider) |
+| Stub repository behavior | `FakeRepository<TAggregate,TId>` | [`FakeRepository<TAggregate,TId>`](#fakerepositorytaggregate-tid) |
+
+## Common traps
+
+- `Unwrap()` and `UnwrapError()` are test helpers. Do not copy them into production code or documentation snippets for application logic.
+- Test both the success path and the expected error branch; a compiling handler that never asserts failure semantics can still miss Trellis behavior.
+- ASP.NET Core integration helpers are in [trellis-api-testing-aspnetcore.md](trellis-api-testing-aspnetcore.md), not this package.
+
+## Types
+
+### Namespace `Trellis.Testing`
+
+#### `ResultAssertionsExtensions`
 ```csharp
-result.Should().BeSuccess()                              // returns AndWhichConstraint with value
-result.Should().BeFailure()                              // returns AndWhichConstraint with Error
-result.Should().BeFailureOfType<NotFoundError>()
-result.Should().HaveValue(expected)
-result.Should().HaveValueMatching(v => v.Name == "test")
-result.Should().HaveValueEquivalentTo(expected)
-result.Should().HaveErrorCode("not.found")
-result.Should().HaveErrorDetail("Order not found")
-result.Should().HaveErrorDetailContaining("not found")
-
-// Async
-await result.Should().BeSuccessAsync()
-await result.Should().BeFailureAsync()
-await result.Should().BeFailureOfTypeAsync<ValidationError>()
-```
-
-## Maybe Assertions
-
-```csharp
-maybe.Should().HaveValue()
-maybe.Should().BeNone()
-maybe.Should().HaveValueEqualTo(expected)
-maybe.Should().HaveValueMatching(v => v > 0)
-maybe.Should().HaveValueEquivalentTo(expected)
-```
-
-🔴 **Do NOT use** `.HasValue.Should().BeTrue()` or `.HasNoValue.Should().BeTrue()` — these bypass
-Trellis.Testing's assertion messages. Always use `.Should().HaveValue()` / `.Should().BeNone()`.
-
-## Error Assertions
-
-```csharp
-error.Should().Be(expectedError)
-error.Should().HaveCode("validation.error")
-error.Should().HaveDetail("Field is required")
-error.Should().HaveDetailContaining("required")
-error.Should().HaveInstance("/orders/123")
-error.Should().BeOfType<ValidationError>()
-```
-
-## ValidationError Assertions
-
-```csharp
-validationError.Should().HaveFieldError("email")
-validationError.Should().HaveFieldErrorWithDetail("email", "Email is required")
-validationError.Should().HaveFieldCount(2)
-```
-
-## Test Builders
-
-```csharp
-// ResultBuilder
-ResultBuilder.Success(value)
-ResultBuilder.Failure<T>(error)
-ResultBuilder.NotFound<T>("Order not found")
-ResultBuilder.NotFound<T>("Order", "123")      // "Order '123' not found"
-ResultBuilder.Validation<T>("Invalid", "field")
-ResultBuilder.Unauthorized<T>()
-ResultBuilder.Forbidden<T>()
-// ... Conflict, Unexpected, Domain, RateLimit, BadRequest, ServiceUnavailable
-
-// ValidationErrorBuilder
-ValidationErrorBuilder.Create()
-    .WithFieldError("email", "Required")
-    .WithFieldError("name", "Too short", "Too long")
-    .Build()           // → ValidationError
-    .BuildFailure<T>() // → Result<T>
-```
-
-## FakeRepository
-
-**Namespace: `Trellis.Testing.Fakes`**
-
-In-memory repository for Application-layer handler tests. Stores entities in a dictionary, returns
-`Result<T>` (NotFound if missing), and captures published domain events.
-
-```csharp
-// Construction
-var repo = new FakeRepository<Order, OrderId>();
-
-// CRUD operations
-await repo.SaveAsync(order);
-var result = await repo.GetByIdAsync(orderId);        // Result<Order> (NotFound if missing)
-var maybe = await repo.FindByIdAsync(orderId);        // Result<Maybe<Order>>
-await repo.DeleteAsync(orderId);
-
-// Seeding test data
-var order = Order.Create(...);
-await repo.SaveAsync(order);                           // Now GetByIdAsync will return it
-
-// Domain event inspection
-repo.PublishedEvents                                   // IReadOnlyList<IDomainEvent>
-```
-
-## TestActorProvider and TestActorScope
-
-**Namespace: `Trellis.Testing.Fakes`**
-
-Mutable `IActorProvider` for authorization testing. Uses `AsyncLocal<Actor?>` internally so parallel tests sharing a singleton provider never interfere. `WithActor` returns a scope that restores the previous actor on dispose, eliminating `try/finally` boilerplate.
-
-Implements `IActorProvider` with `GetCurrentActorAsync()` returning `Task.FromResult()`. Register as `IActorProvider` in DI.
-
-### Construction
-
-```csharp
-var actorProvider = new TestActorProvider("admin", "Orders.Read", "Orders.Write");
-var actorFromInstance = new TestActorProvider(actor);               // from Actor instance
-```
-
-### Scoped Actor Switching
-
-```csharp
-// Temporarily switch actor — restored on dispose
-await using var scope1 = actorProvider.WithActor("user-1", "Orders.Read");
-await using var scope2 = actorProvider.WithActor(actor);           // from Actor instance
-
-// Synchronous dispose also supported
-using var scope3 = actorProvider.WithActor("user-1", "Orders.Read");
-```
-
-### Nested Scopes
-
-```csharp
-await using (actorProvider.WithActor("user-1", "Read"))
+public static class ResultAssertionsExtensions
 {
-    await using (actorProvider.WithActor("user-2", "Write"))
-    {
-        // actor is user-2
-    }
-    // actor is user-1
+    public static ResultAssertions<TValue> Should<TValue>(this Result<TValue> result);
 }
-// actor is admin
 ```
 
-## ServiceCollection Extensions
-
-Replaces existing `IResourceLoader<TMessage, TResource>` DI registrations with a test implementation. Registered as scoped, matching the production lifetime.
-
+#### `ResultAssertions<TValue>`
 ```csharp
-// Stateless fake — capture a pre-created instance
-var fakeLoader = new FakeOrderResourceLoader(fakeRepo);
-services.ReplaceResourceLoader<CancelOrderCommand, Order>(_ => fakeLoader);
-
-// Scoped dependency — resolve from the container
-services.ReplaceResourceLoader<CancelOrderCommand, Order>(
-    sp => new FakeOrderResourceLoader(sp.GetRequiredService<AppDbContext>()));
-// Internally: RemoveAll + AddScoped
-```
-
-## WebApplicationFactory Extensions
-
-Creates an `HttpClient` with the `X-Test-Actor` header pre-set, encoding actor identity and permissions as JSON.
-
-```csharp
-// Extension on WebApplicationFactory<TEntryPoint>
-var client = factory.CreateClientWithActor("user-1", "Orders.Create", "Orders.Read");
-// Sets header: X-Test-Actor: {"Id":"user-1","Permissions":["Orders.Create","Orders.Read"]}
-```
-
----
-
-## ReplaceDbProvider
-
-Cleanly swaps the EF Core database provider in `WebApplicationFactory` tests. Removes all EF Core internal services for the context (including `IDbContextOptionsConfiguration<TContext>` in EF Core 10) and re-registers with the new provider.
-
-```csharp
-// In TestWebApplicationFactoryFixture.ConfigureWebHost
-builder.ConfigureServices(services =>
-    services.ReplaceDbProvider<AppDbContext>(options =>
-        options.UseSqlite(_connection).AddTrellisInterceptors()));
-```
-
-> **Limitation:** Always re-registers via `AddDbContext<TContext>`. If the application uses `AddDbContextFactory` or `AddPooledDbContextFactory`, swap providers manually instead of using this helper.
-
----
-
-## ClaimsActorProvider and CachingActorProvider in Tests
-
-For integration tests using `WebApplicationFactory`, the `DevelopmentActorProvider` (via `X-Test-Actor` header) is the standard approach. `ClaimsActorProvider` and `CachingActorProvider` are production providers — they read from `HttpContext.User` which requires real authentication middleware.
-
-If your tests need to exercise `ClaimsActorProvider` directly, construct a `ClaimsPrincipal` and set it on `HttpContext.User`:
-
-```csharp
-var identity = new ClaimsIdentity(new[]
+public class ResultAssertions<TValue> : ReferenceTypeAssertions<Result<TValue>, ResultAssertions<TValue>>
 {
-    new Claim("sub", "user-1"),
-    new Claim("permissions", "orders:read"),
-}, "Bearer");
-var httpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) };
+    public ResultAssertions(Result<TValue> result);
+
+    public AndWhichConstraint<ResultAssertions<TValue>, TValue> BeSuccess(
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndWhichConstraint<ResultAssertions<TValue>, Error> BeFailure(
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndWhichConstraint<ResultAssertions<TValue>, TError> BeFailureOfType<TError>(
+        string because = "",
+        params object[] becauseArgs)
+        where TError : Error;
+
+    public AndConstraint<ResultAssertions<TValue>> HaveValue(
+        TValue expectedValue,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ResultAssertions<TValue>> HaveValueMatching(
+        Func<TValue, bool> predicate,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ResultAssertions<TValue>> HaveValueEquivalentTo(
+        TValue expectedValue,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ResultAssertions<TValue>> HaveErrorCode(
+        string expectedCode,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ResultAssertions<TValue>> HaveErrorDetail(
+        string expectedDetail,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ResultAssertions<TValue>> HaveErrorDetailContaining(
+        string substring,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ResultAssertions<TValue>> Be(
+        Result<TValue> expected,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ResultAssertions<TValue>> NotBe(
+        Result<TValue> unexpected,
+        string because = "",
+        params object[] becauseArgs);
+}
 ```
 
-For `CachingActorProvider`, register via DI using `AddCachingActorProvider<T>()`. For unit tests, construct with an `IHttpContextAccessor`:
+#### `UnwrapError(this Result<Unit>)`
+The `UnwrapError` extension also has a `Result<Unit>`-specific overload at `Trellis.Testing.UnwrapExtensions.UnwrapError(this Result<Unit>)` for tests asserting on no-payload results.
 
+#### `ResultAssertionsAsyncExtensions`
 ```csharp
-var inner = new TestActorProvider("user-1", "orders:read");
-var accessor = new HttpContextAccessor(); // no HttpContext in unit tests — uses CancellationToken.None
-var caching = new CachingActorProvider(inner, accessor);
-var actor = await caching.GetCurrentActorAsync(ct);  // calls inner once, caches
+public static class ResultAssertionsAsyncExtensions
+{
+    public static Task<AndWhichConstraint<ResultAssertions<TValue>, TValue>> BeSuccessAsync<TValue>(
+        this Task<Result<TValue>> resultTask,
+        string because = "",
+        params object[] becauseArgs);
+
+    public static Task<AndWhichConstraint<ResultAssertions<TValue>, Error>> BeFailureAsync<TValue>(
+        this Task<Result<TValue>> resultTask,
+        string because = "",
+        params object[] becauseArgs);
+
+    public static Task<AndWhichConstraint<ResultAssertions<TValue>, TError>> BeFailureOfTypeAsync<TValue, TError>(
+        this Task<Result<TValue>> resultTask,
+        string because = "",
+        params object[] becauseArgs)
+        where TError : Error;
+
+    public static ValueTask<AndWhichConstraint<ResultAssertions<TValue>, TValue>> BeSuccessAsync<TValue>(
+        this ValueTask<Result<TValue>> resultTask,
+        string because = "",
+        params object[] becauseArgs);
+
+    public static ValueTask<AndWhichConstraint<ResultAssertions<TValue>, Error>> BeFailureAsync<TValue>(
+        this ValueTask<Result<TValue>> resultTask,
+        string because = "",
+        params object[] becauseArgs);
+
+    public static ValueTask<AndWhichConstraint<ResultAssertions<TValue>, TError>> BeFailureOfTypeAsync<TValue, TError>(
+        this ValueTask<Result<TValue>> resultTask,
+        string because = "",
+        params object[] becauseArgs)
+        where TError : Error;
+}
 ```
 
----
-
-## Test Patterns
-
-### Testing Result<T> with TRLS003 Analyzer
-
-The `TRLS003` analyzer warns when accessing `result.Value` without checking `IsSuccess`. Since
-`TreatWarningsAsErrors` is typically enabled, use FluentAssertions to access values safely:
-
+#### `MaybeAssertionsExtensions`
 ```csharp
-// ✅ Correct — chain off .Which after asserting success
-var result = Customer.TryCreate(firstName, lastName, email, phone, address);
-result.Should().BeSuccess()
-    .Which.Email.Should().Be(email);
-
-// ✅ Also correct — assert then access .Value (TRLS003 still fires but assertion guarantees safety)
-var result = Order.TryCreate(customerId, lineItems);
-result.Should().BeSuccess();
-var order = result.Value;    // safe after assertion, suppress TRLS003 if needed
-
-// ✅ Correct — failure assertions
-var result = order.Submit();
-result.Should().BeFailure()
-    .Which.Should().BeOfType<ValidationError>();
-
-// ❌ Wrong — TRLS003 compile error
-var customer = Customer.TryCreate(...).Value;  // Accessing .Value without guard
+public static class MaybeAssertionsExtensions
+{
+    public static MaybeAssertions<T> Should<T>(this Maybe<T> maybe)
+        where T : notnull;
+}
 ```
 
-### Domain Unit Tests
+#### `MaybeAssertions<T>`
+```csharp
+public class MaybeAssertions<T> : ReferenceTypeAssertions<Maybe<T>, MaybeAssertions<T>>
+    where T : notnull
+{
+    public MaybeAssertions(Maybe<T> maybe);
+
+    public AndWhichConstraint<MaybeAssertions<T>, T> HaveValue(
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<MaybeAssertions<T>> BeNone(
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<MaybeAssertions<T>> HaveValueEqualTo(
+        T expectedValue,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<MaybeAssertions<T>> HaveValueMatching(
+        Func<T, bool> predicate,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<MaybeAssertions<T>> HaveValueEquivalentTo(
+        T expectedValue,
+        string because = "",
+        params object[] becauseArgs);
+}
+```
+
+#### `ErrorAssertionsExtensions`
+```csharp
+public static class ErrorAssertionsExtensions
+{
+    public static ErrorAssertions Should(this Error? error);
+}
+```
+
+#### `ErrorAssertions`
+```csharp
+public class ErrorAssertions : ReferenceTypeAssertions<Error, ErrorAssertions>
+{
+    public ErrorAssertions(Error error);
+
+    public AndConstraint<ErrorAssertions> Be(
+        Error expected,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ErrorAssertions> HaveCode(
+        string expectedCode,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ErrorAssertions> HaveDetail(
+        string expectedDetail,
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ErrorAssertions> HaveDetailContaining(
+        string substring,
+        string because = "",
+        params object[] becauseArgs);
+
+    public new AndWhichConstraint<ErrorAssertions, TError> BeOfType<TError>(
+        string because = "",
+        params object[] becauseArgs)
+        where TError : Error;
+}
+```
+
+> **Note:** The `HaveInstance(...)` assertion was removed. `Error.Instance` is no longer part of the closed-ADT base — the ASP wire layer synthesizes `ProblemDetails.Instance` from the request URL plus any `ResourceRef` carried by the typed payload (e.g. `Error.NotFound.Resource`). Assert against `ResourceRef` directly via `BeOfType<Error.NotFound>().Which.Resource`.
+
+#### `ValidationErrorAssertionsExtensions`
+```csharp
+public static class ValidationErrorAssertionsExtensions
+{
+    // Bound to Error.UnprocessableContent (the replacement for the previous validation error class).
+    // Method names preserved for source-compat at test sites.
+    public static ValidationErrorAssertions Should(this Error.UnprocessableContent error);
+}
+```
+
+#### `ValidationErrorAssertions`
+```csharp
+public class ValidationErrorAssertions : ReferenceTypeAssertions<Error.UnprocessableContent, ValidationErrorAssertions>
+{
+    public ValidationErrorAssertions(Error.UnprocessableContent error);
+
+    public AndConstraint<ValidationErrorAssertions> HaveFieldError(
+        string fieldName,                              // accepted as either "email" or "/email" — normalized via InputPointer.ForProperty
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ValidationErrorAssertions> HaveFieldErrorWithDetail(
+        string fieldName,
+        string expectedDetail,                         // matches FieldViolation.Detail exactly
+        string because = "",
+        params object[] becauseArgs);
+
+    public AndConstraint<ValidationErrorAssertions> HaveFieldCount(
+        int expectedCount,                             // counts distinct field paths
+        string because = "",
+        params object[] becauseArgs);
+}
+```
+
+#### `UnwrapExtensions`
+```csharp
+public static class UnwrapExtensions
+{
+    public static T Unwrap<T>(this Result<T> result);
+
+    public static Error UnwrapError<T>(this Result<T> result);
+
+    public static Error UnwrapError(this Result<Unit> result);
+
+    public static T Unwrap<T>(this Maybe<T> maybe)
+        where T : notnull;
+
+    public static Task<T> UnwrapAsync<T>(this Task<Result<T>> resultTask);
+
+    public static ValueTask<T> UnwrapAsync<T>(this ValueTask<Result<T>> resultTask);
+}
+```
+
+#### `UnwrapFailedException`
+```csharp
+public sealed class UnwrapFailedException : Exception
+{
+    public UnwrapFailedException();
+    public UnwrapFailedException(string message);
+    public UnwrapFailedException(string message, Exception innerException);
+}
+```
+
+#### `AggregateTestMutator`
+```csharp
+public static class AggregateTestMutator
+{
+    [RequiresUnreferencedCode("Uses reflection to set source-generated backing fields. Not AOT-compatible — test-only.")]
+    public static TEntity SetMaybeField<TEntity, TValue>(
+        this TEntity entity,
+        Expression<Func<TEntity, Maybe<TValue>>> propertySelector,
+        TValue? value)
+        where TEntity : class
+        where TValue : notnull;
+
+    [RequiresUnreferencedCode("Uses reflection to set source-generated backing fields. Not AOT-compatible — test-only.")]
+    public static TEntity ClearMaybeField<TEntity, TValue>(
+        this TEntity entity,
+        Expression<Func<TEntity, Maybe<TValue>>> propertySelector)
+        where TEntity : class
+        where TValue : notnull;
+}
+```
+
+> **AOT/trim incompatibility.** `AggregateTestMutator` uses reflection to set source-generated `Maybe<T>` backing fields. Both methods carry `[RequiresUnreferencedCode]`; AOT-published consumers will receive IL2026 / IL3050 warnings at the call site. The helpers are intentionally test-only — do not call them from production code.
+
+#### `FakeRepository<TAggregate, TId>`
+```csharp
+public class FakeRepository<TAggregate, TId>
+    where TAggregate : Aggregate<TId>
+    where TId : notnull
+{
+    public IReadOnlyList<IDomainEvent> PublishedEvents { get; }
+    public int Count { get; }
+
+    public FakeRepository<TAggregate, TId> WithUniqueConstraint(Func<TAggregate, object?> propertySelector);
+
+    public Task<Result<TAggregate>> GetByIdAsync(TId id, CancellationToken cancellationToken = default);
+    public Task<Maybe<TAggregate>> FindByIdAsync(TId id, CancellationToken cancellationToken = default);
+
+    // Read surface mirroring RepositoryBase<TAggregate, TId>. Use these from test
+    // repository adapters that expose specification-based queries.
+    public Task<IReadOnlyList<TAggregate>> QueryAsync(
+        Specification<TAggregate> specification,
+        CancellationToken cancellationToken = default);
+    public Task<bool> ExistsAsync(TId id, CancellationToken cancellationToken = default);
+    public Task<bool> ExistsAsync(
+        Specification<TAggregate> specification,
+        CancellationToken cancellationToken = default);
+    public Task<int> CountAsync(
+        Specification<TAggregate> specification,
+        CancellationToken cancellationToken = default);
+
+    // Setup surface — mirrors RepositoryBase<TAggregate, TId>. Use these in handlers and
+    // in test setup so the same IRepository contract works in both the EF and fake paths.
+    // Both Add and Remove (and DeleteAsync below) capture aggregate.UncommittedEvents()
+    // into PublishedEvents and call AcceptChanges, so deletion-related domain events
+    // are observable through PublishedEvents.
+    public void Add(TAggregate aggregate);
+    public void Remove(TAggregate aggregate);
+    public Task<Result<Unit>> RemoveByIdAsync(TId id, CancellationToken cancellationToken = default);
+
+    // Result-shape surface — only on the fake. Reserve for tests that explicitly assert
+    // on Result-of-save shape (e.g., conflict-result handling). NOT part of RepositoryBase.
+    public Task<Result<Unit>> SaveAsync(TAggregate aggregate, CancellationToken cancellationToken = default);
+    public Task<Result<Unit>> DeleteAsync(TId id, CancellationToken cancellationToken = default);
+
+    public void Clear();
+    public bool Exists(TId id);
+    public TAggregate? Get(TId id);
+    public IEnumerable<TAggregate> GetAll();
+
+    // Predicate/specification-based local helpers. Prefer the RepositoryBase-shaped
+    // QueryAsync/ExistsAsync/CountAsync above when building same-contract test adapters;
+    // these remain available for legacy test code and ad-hoc Func-based filtering.
+    public Task<Maybe<TAggregate>> FindAsync(Func<TAggregate, bool> predicate);
+    public Task<IReadOnlyList<TAggregate>> WhereAsync(Func<TAggregate, bool> predicate);
+    public Task<IReadOnlyList<TAggregate>> WhereAsync(Specification<TAggregate> specification);
+}
+```
+
+> **Cancellation token observability.** All `*Async` methods on `FakeRepository<TAggregate, TId>` accept a `CancellationToken` parameter for source-compat with `RepositoryBase<TAggregate, TId>` but **do not observe it** — the fake completes synchronously. Tests that rely on cancellation behavior need a different test double; this fake intentionally trades cancellation-observability for the simpler synchronous semantics that DDD aggregate tests typically need.
+
+> **Null guards.** `Add`, `Remove`, `SaveAsync`, `WithUniqueConstraint`, `QueryAsync`, `ExistsAsync(Specification<TAggregate>)`, `CountAsync`, `FindAsync`, and `WhereAsync` all `ArgumentNullException.ThrowIfNull(...)` their reference-type parameters. `GetByIdAsync`, `FindByIdAsync`, `RemoveByIdAsync`, `DeleteAsync`, and `ExistsAsync(TId)` rely on the `TId : notnull` constraint at compile time.
+
+#### `FakeSharedResourceLoader<TResource, TId>`
+```csharp
+public class FakeSharedResourceLoader<TResource, TId> : SharedResourceLoaderById<TResource, TId>
+    where TResource : Aggregate<TId>
+    where TId : notnull
+{
+    public FakeSharedResourceLoader(FakeRepository<TResource, TId> repository);
+
+    public override Task<Result<TResource>> GetByIdAsync(TId id, CancellationToken cancellationToken);
+}
+```
+
+#### `TestActorProvider`
+```csharp
+public sealed class TestActorProvider : IActorProvider
+{
+    public TestActorProvider(Actor actor);
+    public TestActorProvider(string userId, params string[] permissions);
+
+    public Task<Actor> GetCurrentActorAsync(CancellationToken cancellationToken = default);
+
+    public TestActorScope WithActor(Actor actor);
+    public TestActorScope WithActor(string userId, params string[] permissions);
+}
+```
+
+#### `TestActorScope`
+```csharp
+public sealed class TestActorScope : IAsyncDisposable, IDisposable
+{
+    public ValueTask DisposeAsync();
+    public void Dispose();
+}
+```
+
+## Usage notes
+
+### Assertions
+
+- Synchronous assertions start from `Result<T>` or `Maybe<T>`:
+  - `result.Should().BeSuccess()`
+  - `result.Should().BeFailureOfType<Error.UnprocessableContent>()`
+  - `maybe.Should().HaveValue()`
+- **Async assertions are extension methods on `Task<Result<T>>` and `ValueTask<Result<T>>`, not on `ResultAssertions<T>`.**
+  - Correct: `await resultTask.BeSuccessAsync();`
+  - Correct: `await valueTaskResult.BeFailureAsync();`
+  - Wrong: `await result.Should().BeSuccessAsync();`
+
+### FakeRepository
+
+- **Setup surface** (mirrors `RepositoryBase<TAggregate, TId>` in `Trellis.EntityFrameworkCore`) — use these from handlers and test setup so the same `IRepository` contract works in both worlds:
+  - `void Add(TAggregate)` — stages an insert; in the fake, immediately visible. Throws `InvalidOperationException` on unique-constraint violation (setup mistakes should fail loud at the call site).
+  - `void Remove(TAggregate)` — stages a delete; no-op if the aggregate is not in the store.
+  - `Task<Result<Unit>> RemoveByIdAsync(TId)` — looks up by ID and removes; returns `Error.NotFound` if missing.
+- **Result-shape surface** (only on the fake — `RepositoryBase` does not expose these) — use only when the test specifically asserts on the `Result` of the persistence call:
+  - `Task<Result<Unit>> SaveAsync(TAggregate)` — returns `Error.Conflict` on unique-constraint violation. Use to test conflict-handling code paths.
+  - `Task<Result<Unit>> DeleteAsync(TId)` — returns `Error.NotFound` on missing. Use to test not-found handling. (`RemoveByIdAsync` is the staging-API-named alias.)
+- `WithUniqueConstraint(Func<TAggregate, object?> propertySelector)` — fluent constraint registration; checked eagerly by `Add` (throws) and at-call by `SaveAsync` (returns `Result`).
+- `Clear()`, `Exists(TId id)`, `Get(TId id)`, `GetAll()`, `Count` — direct inspection helpers
+- `GetByIdAsync` / `DeleteAsync` / `RemoveByIdAsync` return `Error.NotFound` details in the format:
+  - `"{AggregateTypeName} with ID {id} not found"`
+- Unique-constraint conflicts return:
+  - `"A {AggregateTypeName} with the same value already exists."`
+
+> See cookbook **Recipe 16 — Unit of work in handlers** for guidance on which surface to use from where, and the pitfall of accidentally calling `SaveAsync` from a production-shaped repository contract.
+
+## Compilable examples
+
+### Result assertions
 
 ```csharp
+using FluentAssertions;
+using Trellis;
 using Trellis.Testing;
 
-[Fact]
-public void CreateOrder_ValidInput_ReturnsSuccess()
-{
-    var customerId = CustomerId.NewUniqueV4();
-    var result = Order.TryCreate(customerId);
+var success = Result.Ok(42);
+success.Should().BeSuccess().Which.Should().Be(42);
 
-    result.Should().BeSuccess()
-        .Which.CustomerId.Should().Be(customerId);
-}
-
-[Fact]
-public void CreateOrder_EmptySubmit_ReturnsFailure()
-{
-    var orderResult = Order.TryCreate(CustomerId.NewUniqueV4());
-    orderResult.Should().BeSuccess();
-
-    var order = orderResult.Value;
-    var result = order.Submit();
-
-    result.Should().BeFailure()
-        .Which.Should().BeOfType<DomainError>()
-        .Which.Should().HaveDetailContaining("empty");
-}
+var notFound = Result.Fail<int>(new Error.NotFound(ResourceRef.For("Order", "123")) { Detail = "Order 123 not found" });
+notFound.Should().BeFailure()
+    .Which.Detail.Should().Be("Order 123 not found");
 ```
 
-### Application Handler Tests with FakeRepository
+### Async assertions
 
 ```csharp
-[Fact]
-public async Task GetOrder_NotFound_ReturnsNotFoundError()
-{
-    var repo = new FakeRepository<Order, OrderId>();
-    var result = await repo.GetByIdAsync(OrderId.NewUniqueV4());
+using System.Threading.Tasks;
+using FluentAssertions;
+using Trellis;
+using Trellis.Testing;
 
-    result.Should().BeFailure()
-        .Which.Should().BeOfType<NotFoundError>();
-}
+Task<Result<int>> resultTask = Task.FromResult(Result.Ok(42));
+ValueTask<Result<int>> valueTaskResult = ValueTask.FromResult(Result.Ok(7));
+
+(await resultTask.BeSuccessAsync()).Which.Should().Be(42);
+(await valueTaskResult.BeSuccessAsync()).Which.Should().Be(7);
 ```
 
-### Maybe<T> Assertions in Tests
+### FakeRepository
 
 ```csharp
-// ✅ Correct — Trellis.Testing assertions
-customer.PhoneNumber.Should().HaveValue();
-customer.PhoneNumber.Should().BeNone();
-order.SubmittedAt.Should().HaveValue();
-order.SubmittedAt.Should().HaveValueMatching(d => d > DateTime.UtcNow.AddMinutes(-1));
+using System;
+using FluentAssertions;
+using Trellis;
+using Trellis.Testing;
 
-// ❌ Wrong — bypasses Trellis.Testing, poor error messages
-customer.PhoneNumber.HasValue.Should().BeTrue();
-customer.PhoneNumber.HasNoValue.Should().BeTrue();
-```
+public sealed record OrderId(Guid Value);
 
-### Authorization Tests
-
-```csharp
-[Fact]
-public async Task Cancel_ByOwner_Succeeds()
+public sealed class Order : Aggregate<OrderId>
 {
-    var actorProvider = new TestActorProvider("owner-1", Permissions.OrdersCancel);
-    // ... set up order with CreatedByActorId = "owner-1"
-    var result = await sender.Send(new CancelOrderCommand(orderId));
-    result.Should().BeSuccess();
+    public Order(OrderId id) : base(id) { }
 }
 
-[Fact]
-public async Task Cancel_ByNonOwner_ReturnsForbidden()
-{
-    var actorProvider = new TestActorProvider("other-user", Permissions.OrdersCancel);
-    // ... set up order with CreatedByActorId = "owner-1"
-    var result = await sender.Send(new CancelOrderCommand(orderId));
-    result.Should().BeFailureOfType<ForbiddenError>();
-}
+var repo = new FakeRepository<Order, OrderId>()
+    .WithUniqueConstraint(order => order.Id);
+
+var order = new Order(new OrderId(Guid.NewGuid()));
+
+await repo.SaveAsync(order).BeSuccessAsync();
+(await repo.GetByIdAsync(order.Id)).Should().BeSuccess().Which.Should().BeSameAs(order);
+repo.Exists(order.Id).Should().BeTrue();
+repo.Count.Should().Be(1);
 ```

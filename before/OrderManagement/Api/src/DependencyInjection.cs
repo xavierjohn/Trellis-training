@@ -6,7 +6,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
-using ServiceLevelIndicators;
+using Trellis.ServiceLevelIndicators;
 using OrderManagement.Api.Middleware;
 using Trellis.Asp;
 using Trellis.Asp.Authorization;
