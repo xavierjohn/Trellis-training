@@ -17,10 +17,11 @@ The rubric L4 (`docs/evaluation-criteria.md` Level 4) actually scores against th
 | §2 | Every state-machine transition: happy path + side-effect verified + domain event raised |
 | §2 | Every invalid transition: `Result.Fail` with `Error.InvalidInput`; no state mutation |
 | §3 | `Subscription`: `RenewsAt <= StartedAt` rejected; `MarkInactive` idempotent |
-| §3 | `JobRun.Complete`: each counter combination derives the correct `Outcome` |
-| §3 | `JobRun` counter invariant: `Dispatched + SoftFailed + HardFailed + SkippedDuplicate + SkippedInactive == DueCount` on a normally-completed tick |
+| §3 | `JobRun.Complete`: each counter combination derives the correct `Outcome` (including `SkippedBudget > 0` → `PartiallyFailed`) |
+| §3 | `JobRun` counter invariant: `Dispatched + SoftFailed + HardFailed + SkippedDuplicate + SkippedInactive + SkippedBudget == DueCount` on every completed tick (normal, budget-exhausted, cancelled, fail-fast) |
 | §4 | `RunJobTickCommand`: happy-path batch + mixed-outcome batch + wall-clock budget + fail-fast |
 | §4 | `DispatchReminderCommand`: every branch in §6.2 of the spec, including the retry path with `ExistingAttemptId = Some(...)` |
+| §4 | Fail-fast leaves no `Pending` row: after `Error.AuthenticationRequired`, the acquired attempt is persisted as `SoftFailed` (not `Pending`) and the next tick retries it |
 | §4 | Domain event pipeline: `ReminderDispatchedDomainEvent` raised in a tick reaches a registered `IDomainEventHandler<T>` in the worker scope |
 | §5 | Each Trellis `Error` type listed in spec §7 maps to the correct category (Transient / Permanent / Fail-fast). Hand-rolled parallel Transient/Permanent enums are a deduction. |
 | §6 | Composite unique-key violation produces `Skipped(Duplicate)`, not an exception |
@@ -29,6 +30,9 @@ The rubric L4 (`docs/evaluation-criteria.md` Level 4) actually scores against th
 | §7 | Auth composition: an unauthenticated request to `/admin/job-runs/{id}` returns 401, not 200 (`SystemActor` is not granted to anonymous HTTP requests) |
 | §8 | Per-channel `reminders.dispatched.total` increments verified |
 | §8 | `JobRunId` present as a structured log property on every per-item entry |
+| §10 | Due-query `DueSubscriptionWindowSpecification` translates to SQL via `Where(spec)` (SQLite integration test) and matches in-memory evaluation |
+| §10 | Due-query attempt-state join produces `ExistingAttemptId = Some(id)` for `SoftFailed`, `None` for no prior attempt, and excludes triples whose existing attempt is `Dispatched` or `HardFailed` |
+| §10 | Due-query `maxBatchSize` cap and `RenewsAt` ascending ordering honoured |
 
 ## Extended completeness
 
@@ -75,8 +79,9 @@ For every transition on `DispatchAttempt` declared in spec §4:
 | `Subscription`: `RenewsAt <= StartedAt` | rejected at construction; `Result.Fail` with `Error.InvalidInput` |
 | `Subscription`: SMS preference with no phone | construction succeeds (worker handles at dispatch); no domain-level rejection |
 | `Subscription.MarkInactive` idempotency | calling twice does not throw and leaves `IsActive = false` |
-| `JobRun.Complete` → `Succeeded` | counters all zero failures → `Outcome = Succeeded` |
-| `JobRun.Complete` → `PartiallyFailed` | at least one dispatched and at least one failed → `Outcome = PartiallyFailed` |
+| `JobRun.Complete` → `Succeeded` | counters all zero failures and `SkippedBudgetCount = 0` → `Outcome = Succeeded` |
+| `JobRun.Complete` → `PartiallyFailed` (failures) | at least one dispatched and at least one failed → `Outcome = PartiallyFailed` |
+| `JobRun.Complete` → `PartiallyFailed` (budget) | at least one dispatched, zero failures, `SkippedBudgetCount > 0` → `Outcome = PartiallyFailed` (budget blocks `Succeeded`) |
 | `JobRun.Complete` → `Failed` (no successes) | zero dispatched and at least one hard/soft failure → `Outcome = Failed` |
 | `JobRun.FailFast` | `Outcome = Failed`, `FailureSummary` set, `CompletedAt` set |
 | `JobRun` counter monotonicity | counters never decrement |
@@ -89,10 +94,12 @@ For `RunJobTickCommand`:
 |---|---|
 | Happy path — empty due batch | `JobRun.Outcome = Succeeded`; counters all zero; one tick log emitted |
 | Happy path — all dispatched | `JobRun.Outcome = Succeeded`; `DispatchedCount` matches due count |
-| Mixed outcomes | counters match: `Dispatched + SoftFailed + HardFailed + SkippedDuplicate + SkippedInactive == DueCount` (per spec §3.3 invariant) |
-| Wall-clock budget exceeded mid-batch | dispatch loop stops; `JobRun.Outcome = PartiallyFailed`; remaining items not attempted (verified via fake gateway call count) |
-| Fail-fast on `Error.AuthenticationRequired` | tick halts at the offending item; `JobRun.Outcome = Failed`; `FailureSummary` populated; subsequent items not attempted |
-| Cancellation token signalled | dispatch loop exits; `JobRun.Outcome = PartiallyFailed`; `CompletedAt` set |
+| Mixed outcomes | counters match: `Dispatched + SoftFailed + HardFailed + SkippedDuplicate + SkippedInactive + SkippedBudget == DueCount` (per spec §3.3 invariant) |
+| Wall-clock budget exceeded mid-batch | dispatch loop stops; `SkippedBudgetCount == DueCount - attemptedCount`; `JobRun.Outcome = PartiallyFailed`; remaining items not attempted (verified via fake gateway call count) |
+| Wall-clock budget exceeded with all-success attempted prefix | `SkippedBudgetCount > 0` forces `PartiallyFailed` even when `SoftFailedCount = HardFailedCount = 0` |
+| Fail-fast on `Error.AuthenticationRequired` | tick halts at the offending item; `JobRun.Outcome = Failed`; `FailureSummary` populated; subsequent items not attempted; `SkippedBudgetCount` includes the unattempted remainder so the invariant holds |
+| Fail-fast leaves no `Pending` row | the attempt acquired for the offending item is persisted as `SoftFailed` (not `Pending`); on a subsequent tick (with the gateway un-stubbed) the same row transitions through `Pending → Dispatched` and no new row is inserted |
+| Cancellation token signalled | dispatch loop exits; `SkippedBudgetCount` includes the unattempted remainder; `JobRun.Outcome = PartiallyFailed`; `CompletedAt` set |
 | Per-tick DI scope | each tick resolves handlers from a fresh scope (assert by registering a scoped marker service and verifying a different instance per tick) |
 | Time source | `TimeProvider.GetUtcNow()` used to populate `tickStartedAt` (assert by advancing `FakeTimeProvider` and checking persisted `JobRun.StartedAt`) |
 | `SystemActor` resolution in tick scope | `IActorProvider.GetCurrentActorAsync()` returns `Maybe.From(SystemActor)` inside the tick (where `HttpContext` is null); permissions include `reminders:dispatch` |
@@ -171,6 +178,7 @@ For each of the two HTTP endpoints in spec §8:
 | `reminders.failed.total{category=data-error}` increment | captured after an SMS-without-phone HardFailed |
 | `reminders.skipped.total{reason=duplicate}` increment | captured after a duplicate composite-key insert |
 | `reminders.skipped.total{reason=inactive}` increment | captured after a NoLongerEligible skip |
+| `reminders.skipped.total{reason=budget}` increment | captured after a wall-clock-budget abort with unattempted items remaining (recorded once per tick with the remaining count, not per-item) |
 | `reminders.tick.duration` recorded | one histogram observation per completed tick |
 | `reminders.batch.size` recorded | one histogram observation per completed tick |
 | Per-tick log entry | exactly one Information-level "tick completed" entry per tick; contains every count field |
@@ -189,7 +197,7 @@ For every aggregate root and every owned VO:
 |---|---|
 | `Subscription` insert + reload | every property (`SubscriberPhone` absent + present, `MonthlyPrice`, `PreferredChannel`, `IsActive`) survives a save + reload |
 | `DispatchAttempt` insert + reload | every property (`CompletedAt` absent + present, `ProviderMessageId` absent + present, `FailureReason` absent + present, `RetryCount`) round-trips |
-| `JobRun` insert + reload | every counter (`DueCount`, `DispatchedCount`, `SoftFailedCount`, `HardFailedCount`, `SkippedDuplicateCount`, `SkippedInactiveCount`) + `Outcome` + `FailureSummary` (absent + present) round-trips |
+| `JobRun` insert + reload | every counter (`DueCount`, `DispatchedCount`, `SoftFailedCount`, `HardFailedCount`, `SkippedDuplicateCount`, `SkippedInactiveCount`, `SkippedBudgetCount`) + `Outcome` + `FailureSummary` (absent + present) round-trips |
 | `Maybe<T>` absent | `null` column persists as `Maybe<T>.None`; reloads as `None` |
 | `Maybe<T>` present | persists and reloads to a `Some` with equal value |
 | `RequiredEnum<T>` (Channel, Status, Tier, Outcome) | persists as the declared field name; reloads to the same enum value |
@@ -210,15 +218,14 @@ Per spec §6.3, the "due reminders" logic is split into two pieces, tested separ
 | EF translation via `Where(spec)` | hits SQLite in an integration test; returns the same row count as in-memory evaluation over the same data |
 | `Maybe<T>` member access translates (if the spec touches `SubscriberPhone` or similar) | translatable via `MaybeQueryInterceptor` |
 
-### 10.2 Attempt-state join query — selects the most-recent `DispatchAttempt` per triple and produces the `DueReminder` projection with `ExistingAttemptId`.
+### 10.2 Attempt-state join query — left-joins the windowed subscription set against `DispatchAttempts` on the triple and produces the `DueReminder` projection with `ExistingAttemptId`. The unique index on `(SubscriptionId, Tier, Channel)` guarantees at most one attempt per triple.
 
 | Coverage | Required |
 |---|---|
 | Triple with no prior attempt | included; `ExistingAttemptId = None` |
-| Triple whose most recent attempt is `SoftFailed` | included; `ExistingAttemptId = Some(id)` of the soft-failed attempt |
-| Triple whose most recent attempt is `Dispatched` | excluded |
-| Triple whose most recent attempt is `HardFailed` | excluded |
-| Triple with multiple historical attempts | only the most recent is considered |
+| Triple whose existing attempt is `SoftFailed` | included; `ExistingAttemptId = Some(id)` of the soft-failed attempt |
+| Triple whose existing attempt is `Dispatched` | excluded |
+| Triple whose existing attempt is `HardFailed` | excluded |
 | `maxBatchSize` cap | result count `<= maxBatchSize`; ordered by `RenewsAt` ascending |
 
 ## 11. Stop criteria

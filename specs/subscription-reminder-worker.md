@@ -97,18 +97,19 @@ The worker runs unattended. There is no human user behind any operation. Authori
 - `HardFailedCount` — non-negative integer
 - `SkippedDuplicateCount` — non-negative integer (composite-key collision on insert)
 - `SkippedInactiveCount` — non-negative integer (subscription became inactive or vanished between query and dispatch)
+- `SkippedBudgetCount` — non-negative integer (items returned by the due query that the tick did not attempt because the wall-clock budget was exhausted or the worker was cancelled)
 - `FailureSummary` — `Maybe<string>` (1–500 chars; set when `Outcome = Failed`)
 
-**Counter invariant.** `DispatchedCount + SoftFailedCount + HardFailedCount + SkippedDuplicateCount + SkippedInactiveCount = DueCount` on a normally-completed tick. On a fail-fast tick the sum is `<= DueCount` because remaining items were not attempted.
+**Counter invariant.** `DispatchedCount + SoftFailedCount + HardFailedCount + SkippedDuplicateCount + SkippedInactiveCount + SkippedBudgetCount = DueCount` on every completed tick (normal, budget-exhausted, cancelled, and fail-fast). Fail-fast and cancellation contribute remaining unattempted items to `SkippedBudgetCount` so the invariant always holds.
 
 **Rules:**
 - `Outcome` defaults to `Running`; finalised on completion.
-- `Outcome = Succeeded` iff `SoftFailedCount = 0 && HardFailedCount = 0 && FailureSummary = None`. Skip counters do not block `Succeeded` — a skip is a no-op, not a failure.
-- `Outcome = PartiallyFailed` iff `FailureSummary = None && DispatchedCount > 0 && (SoftFailedCount > 0 || HardFailedCount > 0)`.
+- `Outcome = Succeeded` iff `SoftFailedCount = 0 && HardFailedCount = 0 && SkippedBudgetCount = 0 && FailureSummary = None`. `SkippedDuplicate` and `SkippedInactive` do not block `Succeeded` — they are no-ops, not failures. `SkippedBudget > 0` does block `Succeeded` because the tick demonstrably did not finish its work.
+- `Outcome = PartiallyFailed` iff `FailureSummary = None && DispatchedCount > 0 && (SoftFailedCount > 0 || HardFailedCount > 0 || SkippedBudgetCount > 0)`.
 - `Outcome = Failed` iff `FailureSummary` is set (fail-fast condition reached) **or** `DispatchedCount == 0 && (HardFailedCount + SoftFailedCount) > 0` (all attempted items failed).
 
 **Operations:**
-- `IncrementDispatched()`, `IncrementSoftFailed()`, `IncrementHardFailed()`, `IncrementSkippedDuplicate()`, `IncrementSkippedInactive()`
+- `IncrementDispatched()`, `IncrementSoftFailed()`, `IncrementHardFailed()`, `IncrementSkippedDuplicate()`, `IncrementSkippedInactive()`, `IncrementSkippedBudget(count)` (the budget bump is by the remaining unattempted count, not always one)
 - `Complete(completedAt)` — sets `CompletedAt` and derives `Outcome` from counters
 - `FailFast(reason, completedAt)` — sets `Outcome = Failed`, `FailureSummary = reason`, `CompletedAt = completedAt`
 
@@ -166,14 +167,14 @@ The worker is implemented as a single `BackgroundService` (or equivalent `IHoste
 2. Open a fresh DI scope for the tick. Resolve handlers from the scope.
 3. Resolve the `SystemActor` from `IActorProvider`.
 4. Query due reminders (§6.3). The query returns at most `MaxBatchSize` items.
-5. For each due item, dispatch in sequence (see §6.2). Update `JobRun` counters in-place after each item. Honour the wall-clock budget — if exceeded, stop dispatching, mark `JobRun.Outcome = PartiallyFailed`, and finalise.
-6. On fail-fast (§6.4), call `JobRun.FailFast(...)` and halt.
+5. For each due item, dispatch in sequence (see §6.2). Update `JobRun` counters in-place after each item. Honour the wall-clock budget — if exceeded mid-batch, stop dispatching, call `IncrementSkippedBudget(remainingCount)` so the counter invariant holds, then finalise via `Complete(...)` (which derives `Outcome = PartiallyFailed`).
+6. On fail-fast (§6.4), call `IncrementSkippedBudget(remainingCount)` for unattempted items (the offending item has already been persisted as `SoftFailed` by §6.2 step 5 and counted as `SoftFailedCount`), then call `JobRun.FailFast(...)` and halt.
 7. On normal completion, call `JobRun.Complete(...)`. Persist.
 8. Emit one structured log entry summarising the tick (see §9). Emit metric updates.
 
 **Time source:** the worker must obtain "now" from an injected `TimeProvider` (the .NET 8 abstraction, available via `IServiceCollection.AddSingleton(TimeProvider.System)`). Direct calls to `DateTimeOffset.UtcNow` are not permitted because they cannot be controlled in tests.
 
-**Cancellation:** the `BackgroundService.StopAsync` cancellation token must be observed by the dispatch loop. A tick already in progress should attempt to finalise its `JobRun` on cancellation (recording `PartiallyFailed`) rather than aborting mid-update.
+**Cancellation:** the `BackgroundService.StopAsync` cancellation token must be observed by the dispatch loop. A tick already in progress should attempt to finalise its `JobRun` on cancellation: call `IncrementSkippedBudget(remainingCount)` for any items the dispatch loop didn't reach, then `Complete(...)` (which derives `PartiallyFailed`). Aborting mid-update without finalising is not allowed.
 
 ## 6. Operations (Use Cases)
 
@@ -201,8 +202,9 @@ All operations are implemented as Commands or Queries using CQRS. The worker is 
   3. **Check data preconditions.** If `Channel = Sms` and `SubscriberPhone = None`, call `RecordHardFailure(reason: "no phone on file", completedAt: now)` on the attempt acquired in step 2, persist, and return `Result.Ok(DispatchOutcome.HardFailed(DataError))`. Do **not** call the gateway.
   4. **Call the gateway** (`IEmailGateway` or `ISmsGateway`).
   5. **Translate the gateway `Result<ProviderMessageId>`** into the attempt state via the state machine (§4) and the error classification (§7). Persist.
+     - **Fail-fast classifications** (e.g., `Error.AuthenticationRequired`): the attempt acquired in step 2 must **not** be left as `Pending`, which would permanently suppress future reminders for this triple (the due-query only retries `SoftFailed`). Treat the attempt as a soft failure — call `RecordSoftFailure(reason: "{provider} authentication failed", attemptedAt: now)` so the row becomes `SoftFailed` and is eligible for retry on the next tick (after the operator rotates the API key). Persist. Then return `Result.Fail(<the original gateway Error>)` so the orchestrator can short-circuit the remainder of the tick per §6.4.
 - **Success:** `Result.Ok(DispatchOutcome)` where `DispatchOutcome` is one of `Dispatched(messageId) | SoftFailed | HardFailed(category: PermanentGatewayError | RetriesExhausted | DataError) | Skipped(reason)`.
-- **Failure:** only fail-fast conditions (§6.4) produce `Result.Fail`. Per-item soft/hard failures are reported as part of a successful `Result.Ok` so the orchestrator can continue.
+- **Failure:** only fail-fast conditions (§6.4) produce `Result.Fail`. Per-item soft/hard failures are reported as part of a successful `Result.Ok` so the orchestrator can continue. On fail-fast, the attempt row has already been recorded as `SoftFailed` in step 5 — no row is ever left in `Pending` after the handler returns.
 
 Storage-layer idempotency is enforced exclusively through step 2: a new attempt is `INSERT`-then-catch, never `SELECT`-then-decide (which would race across overlapping ticks). Retries explicitly load-by-id because the caller (§6.3) already disambiguated.
 
@@ -213,11 +215,10 @@ Storage-layer idempotency is enforced exclusively through step 2: a new attempt 
 - **Behaviour:** returns a list of `DueReminder { SubscriptionId, Tier, Channel, ExistingAttemptId: Maybe<DispatchAttemptId> }` where:
   - The subscription is active.
   - The tier's anchor time falls within the reminder window around `now`.
-  - For the triple `(SubscriptionId, Tier, Channel)`: either no `DispatchAttempt` exists (then `ExistingAttemptId = None`), or the most recent attempt is `SoftFailed` (then `ExistingAttemptId = Some(id)` and the worker will call `ResetForRetry`).
-  - Triples whose most recent attempt is `Dispatched` or `HardFailed` are **excluded**.
+  - For the triple `(SubscriptionId, Tier, Channel)` — which is unique system-wide per the index on `DispatchAttempts` — the existing attempt (if any) determines inclusion: no attempt → include with `ExistingAttemptId = None`; existing attempt in `SoftFailed` → include with `ExistingAttemptId = Some(id)` (the worker will call `ResetForRetry`); existing attempt in `Dispatched` or `HardFailed` → **excluded**.
 - **Implementation:** two concerns, separately exercised:
   - **`DueSubscriptionWindowSpecification`** — a `Specification<Subscription>` capturing the active + window-overlap predicate. Must translate to SQL and evaluate in-memory.
-  - **Attempt-state join** — a query (not a specification) that joins the windowed subscription set against `DispatchAttempts`, picks the most recent attempt per triple, and produces the `DueReminder` projection with `ExistingAttemptId`.
+  - **Attempt-state join** — a query (not a specification) that left-joins the windowed subscription set against `DispatchAttempts` on the triple, filters in/out by attempt status, and produces the `DueReminder` projection with `ExistingAttemptId`. The unique index guarantees at most one attempt per triple, so no "pick most recent" tie-breaking is required.
 - **Output:** ordered by `RenewsAt` ascending; capped at `maxBatchSize`.
 
 ### 6.4 Fail-Fast Conditions
@@ -227,7 +228,7 @@ The orchestrator (`RunJobTickCommand`) halts the tick and marks `JobRun.Outcome 
 - Any gateway call returns `Result.Fail(Error.AuthenticationRequired)` (e.g., API key revoked). Continuing would generate cascading failures and waste retry budget.
 - Database `SaveChangesAsync` raises an `OperationCanceledException` not originating from the worker's own stop token.
 
-Per-item transient and permanent gateway failures **do not** fail-fast. They roll up into `JobRun` counters and produce `PartiallyFailed` (or `Succeeded` if zero failures occurred).
+Per-item transient and permanent gateway failures **do not** fail-fast. They roll up into `JobRun` counters and produce `PartiallyFailed` (or `Succeeded` if zero failures and zero budget skips occurred).
 
 ### 6.5 Query Job Run By Id (Query)
 
@@ -300,7 +301,8 @@ This service exposes exactly two HTTP endpoints. They exist for operational visi
     "softFailed": 2,
     "hardFailed": 1,
     "skippedDuplicate": 1,
-    "skippedDataError": 0
+    "skippedInactive": 0,
+    "skippedBudget": 0
   }
 }
 ```
@@ -336,7 +338,7 @@ Per tick (one entry, at Information):
 JobRun {JobRunId} completed: outcome={Outcome}, due={DueCount},
 dispatched={DispatchedCount}, softFailed={SoftFailedCount},
 hardFailed={HardFailedCount}, skippedDuplicate={SkippedDuplicateCount},
-skippedInactive={SkippedInactiveCount}, duration={DurationMs}ms
+skippedInactive={SkippedInactiveCount}, skippedBudget={SkippedBudgetCount}, duration={DurationMs}ms
 ```
 
 Per dispatch (one entry, level depends on outcome):
@@ -417,8 +419,8 @@ This section enumerates worker-layer failure categories. Because the worker has 
 | Subscription has `Channel = Sms` but `SubscriberPhone = None` | DataError | Persist `DispatchAttempt` as `HardFailed` with reason `"no phone on file"`; increments `JobRun.HardFailedCount`. Gateway is **not** called. |
 | Subscription `IsActive = false` (or missing) between query and dispatch | NoLongerEligible | No `DispatchAttempt` created or mutated; increments `JobRun.SkippedInactiveCount`. Log at Information. |
 | Composite unique violation on `DispatchAttempt` insert | DuplicateSkip | Increments `JobRun.SkippedDuplicateCount`. No error. |
-| Tick wall-clock budget exceeded mid-batch | TimeBudget | Stop dispatching. Mark `JobRun.Outcome = PartiallyFailed` (or `Succeeded` if all attempted items succeeded). |
-| Worker stop token signalled | Cancellation | Stop dispatching. Finalise `JobRun` with current counters. Mark `Outcome = PartiallyFailed`. |
+| Tick wall-clock budget exceeded mid-batch | TimeBudget | Stop dispatching. Increment `SkippedBudgetCount` by the number of unattempted due items so the counter invariant holds. Mark `JobRun.Outcome = PartiallyFailed`. |
+| Worker stop token signalled | Cancellation | Stop dispatching. Increment `SkippedBudgetCount` by the number of unattempted due items. Finalise `JobRun` with current counters. Mark `Outcome = PartiallyFailed`. |
 
 For the admin HTTP endpoint, standard mappings apply: 401 unauthenticated, 403 missing permission, 404 not found, 422 validation, 400 framework-level. These follow the same conventions as the OM spec.
 
@@ -464,7 +466,8 @@ Scenarios to cover:
 - One tick with mixed outcomes → counter invariant holds (§3.3).
 - Transient → next tick retries → eventual `Dispatched`. Verify the same `DispatchAttempt` row is updated (not a second row inserted).
 - Transient × 5 → `HardFailed` after retry cap with reason `"transient retries exhausted"`.
-- `AuthenticationRequired` → tick halts; `JobRun.Outcome = Failed`; subsequent items not attempted; the originally-failing item's `DispatchAttempt` is **not** persisted as a hard failure (the tick aborted before the orchestrator could classify it).
+- `AuthenticationRequired` → tick halts; `JobRun.Outcome = Failed`; subsequent items not attempted (`SkippedBudgetCount` covers them so the counter invariant holds); the originally-failing item's `DispatchAttempt` is persisted as `SoftFailed` with reason `"{provider} authentication failed"` (per §6.2 step 5 — never `Pending`, which would permanently suppress the triple).
+- `AuthenticationRequired` recovery → after the failed tick above, swap the fake gateway to a healthy stub and run another tick. The same `DispatchAttempt` row (loaded via `ExistingAttemptId = Some(id)`) transitions `SoftFailed → Pending → Dispatched`; no second row is inserted.
 - Duplicate composite-key insert (simulate by inserting an attempt out-of-band before the tick runs) → `SkippedDuplicateCount` incremented; no exception escapes.
 - SMS preference with no phone → `HardFailed` with reason `"no phone on file"`; gateway **not** called (assert fake recorded zero calls for that subscription).
 
