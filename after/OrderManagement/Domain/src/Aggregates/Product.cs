@@ -1,57 +1,67 @@
-namespace OrderManagement.Domain.Aggregates;
+﻿namespace OrderManagement.Domain;
 
-using OrderManagement.Domain.ValueObjects;
-using Trellis.Primitives;
-
-public class Product : Aggregate<ProductId>
+/// <summary>
+/// An item available for purchase. Identified by <see cref="ProductId"/> and
+/// addressable by its unique <see cref="Sku"/>.
+/// </summary>
+public partial class Product : Aggregate<ProductId>
 {
     public ProductName ProductName { get; private set; } = null!;
     public Sku Sku { get; private set; } = null!;
-    public Money UnitPrice { get; private set; } = null!;
+    public UnitPrice UnitPrice { get; private set; } = null!;
     public StockQuantity StockQuantity { get; private set; } = null!;
 
+    /// <summary>EF Core constructor.</summary>
     private Product() : base(default!) { }
 
-    public static Result<Product> TryCreate(
-        ProductName productName,
-        Sku sku,
-        Money unitPrice)
+    public Product(ProductName productName, Sku sku, UnitPrice unitPrice)
+        : base(ProductId.NewUniqueV7())
     {
-        if (unitPrice.Amount <= 0)
-        {
-            return Error.Validation("Unit price must be greater than zero.", "unitPrice");
-        }
+        ProductName = productName;
+        Sku = sku;
+        UnitPrice = unitPrice;
 
-        var product = new Product
-        {
-            Id = ProductId.NewUniqueV7(),
-            ProductName = productName,
-            Sku = sku,
-            UnitPrice = unitPrice,
-            StockQuantity = StockQuantity.Zero
-        };
-
-        return product;
+        if (!StockQuantity.TryCreate(0).TryGetValue(out var initialStock))
+            throw new InvalidOperationException("StockQuantity.TryCreate(0) must succeed — 0 is a valid stock quantity.");
+        StockQuantity = initialStock;
     }
 
-    public Result<Product> AddStock(int quantity)
+    /// <summary>
+    /// Increases stock by the given positive amount.
+    /// </summary>
+    public Result<StockQuantity> AddStock(int quantity)
     {
-        return StockQuantity.Add(quantity)
-            .Tap(sq => StockQuantity = sq)
-            .Map(_ => this);
+        if (quantity <= 0)
+            return Result.Fail<StockQuantity>(
+                Error.InvalidInput.ForField("quantity", "product.add-stock.non-positive", "Quantity to add must be positive."));
+
+        return StockQuantity.TryCreate(StockQuantity.Value + quantity)
+            .Tap(updated => StockQuantity = updated);
     }
 
-    public Result<Product> ReserveStock(int quantity)
+    /// <summary>
+    /// Decreases stock by the given positive amount. Fails if insufficient stock.
+    /// </summary>
+    public Result<StockQuantity> ReserveStock(int quantity)
     {
-        return StockQuantity.Reserve(quantity)
-            .Tap(sq => StockQuantity = sq)
-            .Map(_ => this);
+        if (quantity <= 0)
+            return Result.Fail<StockQuantity>(
+                Error.InvalidInput.ForField("quantity", "product.reserve-stock.non-positive", "Quantity to reserve must be positive."));
+
+        if (StockQuantity.Value < quantity)
+            return Result.Fail<StockQuantity>(
+                Error.InvalidInput.ForRule(
+                    "product.insufficient-stock",
+                    $"Product '{ProductName.Value}' has insufficient stock: requested {quantity}, available {StockQuantity.Value}."));
+
+        return StockQuantity.TryCreate(StockQuantity.Value - quantity)
+            .Tap(updated => StockQuantity = updated);
     }
 
-    public Result<Product> ReleaseStock(int quantity)
-    {
-        return StockQuantity.Release(quantity)
-            .Tap(sq => StockQuantity = sq)
-            .Map(_ => this);
-    }
+    /// <summary>
+    /// Releases reserved stock — increases stock back by the given positive amount.
+    /// Used by the Cancel-Order path when a Submitted/Approved order is cancelled
+    /// to restore the reserved-but-not-yet-shipped quantities.
+    /// </summary>
+    public Result<StockQuantity> ReleaseStock(int quantity) => AddStock(quantity);
 }

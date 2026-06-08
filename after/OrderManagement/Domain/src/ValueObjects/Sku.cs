@@ -1,29 +1,18 @@
-namespace OrderManagement.Domain.ValueObjects;
+﻿namespace OrderManagement.Domain;
 
 using System.Text.RegularExpressions;
 
-public partial class Sku : ScalarValueObject<Sku, string>, IScalarValue<Sku, string>
+/// <summary>
+/// Stock Keeping Unit. 3–20 characters, uppercase alphanumeric only.
+/// </summary>
+[StringLength(20)]
+public partial class Sku : RequiredString<Sku>
 {
-    private static readonly Regex SkuPattern = new("^[A-Z0-9]{3,20}$", RegexOptions.Compiled);
+    private static readonly Regex SkuPattern = new(@"^[A-Z0-9]{3,20}$", RegexOptions.Compiled);
 
-    private Sku(string value) : base(value) { }
-
-    public static Result<Sku> TryCreate(string? value, string? fieldName = null)
+    static partial void ValidateAdditional(string value, string fieldName, ref string? errorMessage)
     {
-        fieldName ??= "Sku";
-
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return Error.Validation($"{fieldName} is required.", fieldName);
-        }
-
-        var trimmed = value.Trim().ToUpperInvariant();
-
-        if (!SkuPattern.IsMatch(trimmed))
-        {
-            return Error.Validation($"{fieldName} must be 3-20 uppercase alphanumeric characters.", fieldName);
-        }
-
-        return new Sku(trimmed);
+        if (string.IsNullOrEmpty(value) || !SkuPattern.IsMatch(value))
+            errorMessage = "SKU must be 3–20 characters of uppercase letters and digits only.";
     }
 }

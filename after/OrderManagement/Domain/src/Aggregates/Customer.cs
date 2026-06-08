@@ -1,35 +1,36 @@
-namespace OrderManagement.Domain.Aggregates;
+﻿namespace OrderManagement.Domain;
 
-using OrderManagement.Domain.ValueObjects;
 using Trellis.Primitives;
 
+/// <summary>
+/// A person or organization that places orders. Identified by <see cref="CustomerId"/>.
+/// </summary>
 public partial class Customer : Aggregate<CustomerId>
 {
-    public CustomerFirstName FirstName { get; private set; } = null!;
-    public CustomerLastName LastName { get; private set; } = null!;
+    public FirstName FirstName { get; private set; } = null!;
+    public LastName LastName { get; private set; } = null!;
     public EmailAddress Email { get; private set; } = null!;
-    public partial Maybe<PhoneNumber> PhoneNumber { get; set; }
+
+    /// <summary>Optional phone number. Stored as <see cref="Maybe{T}"/>.</summary>
+    public partial Maybe<PhoneNumber> PhoneNumber { get; private set; }
+
     public ShippingAddress ShippingAddress { get; private set; } = null!;
 
+    /// <summary>EF Core constructor.</summary>
     private Customer() : base(default!) { }
 
-    public static Result<Customer> TryCreate(
-        CustomerFirstName firstName,
-        CustomerLastName lastName,
+    public Customer(
+        FirstName firstName,
+        LastName lastName,
         EmailAddress email,
         Maybe<PhoneNumber> phoneNumber,
         ShippingAddress shippingAddress)
+        : base(CustomerId.NewUniqueV7())
     {
-        var customer = new Customer
-        {
-            Id = CustomerId.NewUniqueV7(),
-            FirstName = firstName,
-            LastName = lastName,
-            Email = email,
-            PhoneNumber = phoneNumber,
-            ShippingAddress = shippingAddress
-        };
-
-        return customer;
+        FirstName = firstName;
+        LastName = lastName;
+        Email = email;
+        PhoneNumber = phoneNumber;
+        ShippingAddress = shippingAddress;
     }
 }

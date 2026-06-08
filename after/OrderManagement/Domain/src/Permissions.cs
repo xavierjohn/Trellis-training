@@ -1,5 +1,9 @@
-namespace OrderManagement.Domain;
+﻿namespace OrderManagement.Domain;
 
+/// <summary>
+/// Permission identifiers used by the Order Management service. Referenced by every
+/// command/query through <see cref="Trellis.Authorization.IAuthorize.RequiredPermissions"/>.
+/// </summary>
 public static class Permissions
 {
     public const string CustomersCreate = "customers:create";
