@@ -2,7 +2,7 @@
 
 > This specification describes an HTTP API service that issues short codes for long URLs and redirects browsers from the short form back to the original. It is intended to be given to an AI along with the Trellis Copilot Instructions to generate a working .NET application. The spec focuses on business requirements and outcomes. Implementation patterns come from the Copilot Instructions.
 >
-> **This lab is deliberately unversioned.** The host must not register `AddApiVersioning(...)`, must not declare `ApiVersion` attributes, and must not call `WithVersionedRoute(...)`. All routes are plain (`/links`, `/links/{id}`, `/{shortCode}`) with no `?api-version=` query parameter. The spec exists to stress Trellis HTTP primitives — `WithLocation`, `HttpContext.PageUrl`, `AddTrellisProblemDetails`, paginated GET ergonomics, ETag / `If-None-Match`, `IActorProvider`, `Result<T>` — in a host that never opted into versioning. Implementations should compose framework primitives without reaching for the versioning helpers (which would either be a no-op or a runtime error in an unversioned host).
+> **This lab is deliberately unversioned at the *host* level.** The host must not register `AddApiVersioning(...)`, must not decorate handlers with `ApiVersion` attributes, must not include `:apiVersion` in any route template, and no route requires a `?api-version=` query parameter. All routes are plain (`/links`, `/links/{id}`, `/{shortCode}`). However, the implementation **is required to use `Trellis.Asp.ApiVersioning` helpers** (`HttpContext.PageUrl(...)`, `.WithVersionedRoute()` chained on Location-emitting response builders) — verifying that these helpers **degrade gracefully** (skip api-version injection when the target endpoint has no `ApiVersionMetadata`, emit clean URLs, never throw) **is the central thing this lab measures**. The spec exists to stress Trellis HTTP primitives — `WithLocation`, `HttpContext.PageUrl`, `AddTrellisProblemDetails`, paginated GET ergonomics, ETag / `If-None-Match`, `IActorProvider`, `Result<T>` — in a host that never opted into versioning.
 
 ## 1. Domain Overview
 
@@ -32,7 +32,7 @@ The service is HTTP-shaped end-to-end: every operation is a request handler. The
 **Identity:** `LinkId` (unique identifier).
 
 **Properties:**
-- `ShortCode` — required, unique system-wide, 4–12 chars, `[A-Za-z0-9_-]+`
+- `ShortCode` — required, unique system-wide, 4–12 chars, `[A-Za-z0-9_-]+`, and not a reserved root segment (`links`, `health`, case-insensitive — these collide with the literal API routes at `/links` and `/health`)
 - `OriginalUrl` — required, `OriginalUrl` value object (absolute http/https, ≤2048 chars)
 - `OwnerId` — required `OwnerId` value object; captured at creation, immutable
 - `CreatedAt` — required UTC timestamp
@@ -43,6 +43,7 @@ The service is HTTP-shaped end-to-end: every operation is a request handler. The
 - A link cannot be created with `ExpiresAt <= CreatedAt`.
 - A link cannot be created with an `OriginalUrl` whose scheme is neither `http` nor `https`.
 - A link cannot be created with a `ShortCode` that already exists (storage-layer unique constraint; see §10).
+- A link cannot be created with a `ShortCode` equal to a reserved root route segment (`links` or `health`, case-insensitive). Such a code would be shadowed by the literal API route at `/links` or `/health` and the redirect would be unreachable. Rejected at the value-object boundary in `ShortCode.TryCreate`.
 - `OwnerId` is immutable after creation.
 - `ShortCode` is immutable after creation. (Renaming would break every short link already in circulation.)
 - `OriginalUrl` is immutable after creation. (Re-pointing an existing short link to a different destination is out of scope; users mint a new link instead — see §14.)
@@ -185,7 +186,7 @@ Permission: `links:write` (owner) or `links:admin`.
 
 Request: empty body.
 
-Response: `200 OK`, `Location: /links/{id}`, body = the updated `LinkView` (with `isActive: false`). The implementation **must** build the `Location` header via `HttpResponseOptionsBuilder<T>.WithLocation("GetLinkById", ...)` chained with `.WithVersionedRoute()`. As with `POST /links`, the `WithVersionedRoute` chain must emit a plain `/links/{id}` URL with no `api-version=` injection and must not throw. This endpoint is the lab's 200+Location test site for `WithLocation` + `WithVersionedRoute` graceful degradation (the 201 path tests `CreatedAtRoute` + `WithVersionedRoute`; both are alpha.305 paths).
+Response: `200 OK`, `Location: /links/{id}`, body = the updated `LinkView` (with `isActive: false`). The implementation **must** build the `Location` header via `HttpResponseOptionsBuilder<T>.WithLocation("GetLinkById", ...)` chained with `.WithVersionedRoute()`. As with `POST /links`, the `WithVersionedRoute` chain must emit a plain `/links/{id}` URL with no `api-version=` injection and must not throw. This endpoint is the lab's 200+Location test site for `WithLocation` + `WithVersionedRoute` graceful degradation (the 201 path tests `CreatedAtRoute` + `WithVersionedRoute`; both are unversioned-host regression paths).
 
 The operation is idempotent: disabling an already-disabled link is a no-op success (no domain event raised) and still produces 200 + `Location` + the current `LinkView`.
 
@@ -235,7 +236,7 @@ Response: `200 OK`, body =
 
 `nextCursor` is omitted (not `null`) on the last page (`Maybe<Cursor>` standard JSON behavior).
 
-`Link` header (when `nextCursor` is present): `<...?cursor=<next>&limit=<n>>; rel="next"`, built via `HttpContext.PageUrl(routeName: "ListLinks", ...)`. Absent on the last page. The implementation **must** call `HttpContext.PageUrl(...)` rather than hand-concatenating the URL — this is the central PageUrl alpha.305 test (§13.3). In an unversioned host, `PageUrl` emits a plain URL with no `api-version=` parameter and does not throw.
+`Link` header (when `nextCursor` is present): `<...?cursor=<next>&limit=<n>>; rel="next"`, built via `HttpContext.PageUrl(routeName: "ListLinks", ...)`. Absent on the last page. The implementation **must** call `HttpContext.PageUrl(...)` rather than hand-concatenating the URL — this is the central `PageUrl` regression test (§13.3). In an unversioned host, `PageUrl` emits a plain URL with no `api-version=` parameter and does not throw.
 
 **`GET /links/{id}/stats`**
 
@@ -272,7 +273,19 @@ Only `GET` is required on `/{shortCode}`. `HEAD`, `OPTIONS`, and other methods p
 
 ## 6. Operations (Use Cases)
 
-All operations are implemented as Commands or Queries using CQRS, executed through the mediator pipeline. Every handler returns `Result<T>` (or `Result` for void). The error categorisation (§9) determines the HTTP status the response writer produces.
+All operations are implemented as Commands or Queries using CQRS, executed through the mediator pipeline. Every handler returns `Result<T>`; no-payload commands return `Result<Trellis.Unit>` via `Result.Ok()` / `Result.Fail(error)`. The error categorisation (§9) determines the HTTP status the response writer produces.
+
+### 6.0 Implementation pattern: resource authorization
+
+All LinkId-scoped operations (§6.3–§6.7) must use the Trellis **v4 typed-accessor + HideExistence** pattern from `Trellis.Mediator`:
+
+- Each LinkId-scoped command/query implements `IAuthorizeResource<Link>` + `IIdentifyResource<Link, LinkId>`.
+- A single `LinkResourceLoader : SharedResourceLoaderById<Link, LinkId>` bridges the EF `Maybe<Link>` lookup into the pipeline's `Result<Link>` (returning `Error.NotFound(ResourceRef.For<Link>(id.Value))` on miss).
+- The host configures `services.AddResourceAuthorization(typeof(Link).Assembly)` to scan + register the loader and per-message authorize bindings, and `services.AddResourceAuthorization(o => o.HideExistence<Link>())` to translate both load-failure (`Error.NotFound`) and authorize-failure (`Error.Forbidden`) into the unified `Error.NotFound` that the response writer maps to `404`.
+- Mutation handlers consume `IAuthorizedResource<TCommand, Link>` and call `.GetRequiredResource()` instead of reloading the link from a repository — this is the **load-once invariant** the lab measures.
+- The `Authorize(actor, link)` implementation on each message holds the ownership rule (`actor.Id.Value == link.OwnerId.Value || actor.Permissions.Contains("links:admin")`). Failure returns `Result.Fail(new Error.Forbidden("links.not-owner-or-admin", ResourceRef.For<Link>(link.Id.Value)))`.
+
+The spec sections below describe the **observable behaviour** of each operation. They do not re-state the v4 pattern at every site — that wiring is global per §6.0. The coverage checklist (§3.5 and §7.3) explicitly verifies both the framework pattern AND the externally observable 404 outcome.
 
 ### 6.1 Create Link (Command)
 
@@ -288,10 +301,10 @@ All operations are implemented as Commands or Queries using CQRS, executed throu
   5. On `DbUpdateException` whose inner is a unique-constraint violation on `IdempotencyRecords(OwnerId, IdempotencyKey)`:
      - Roll back. Re-open a read scope and `SELECT` the existing `IdempotencyRecord`.
      - If `existing.CanonicalRequestJson == canonicalRequestJson`: load the referenced `Link`, return `Result.Ok(CreateLinkOutcome.Replayed(link))`.
-     - Else: return `Result.Fail(Error.Conflict("idempotency-key-mismatch"))`.
+     - Else: return `Result.Fail(new Error.Conflict(null, "idempotency-key-mismatch"))`.
   6. On `DbUpdateException` whose inner is a unique-constraint violation on `Links(ShortCode)`:
-     - If `customShortCode` was supplied: return `Result.Fail(Error.Conflict("short-code-taken"))`. The user must pick a different code.
-     - If the code was system-generated: regenerate and retry, up to a bounded number of attempts (the lab uses 5). On exhaustion: `Result.Fail(Error.Unavailable("short-code-generation-exhausted"))`.
+     - If `customShortCode` was supplied: return `Result.Fail(new Error.Conflict(null, "short-code-taken"))`. The user must pick a different code.
+     - If the code was system-generated: regenerate and retry, up to a bounded number of attempts (the lab uses 5). On exhaustion: `Result.Fail(new Error.Unavailable("short-code-generation-exhausted"))`.
   7. On success, return `Result.Ok(CreateLinkOutcome.Created(link))`.
 - **Output:** `Result<CreateLinkOutcome>` where `CreateLinkOutcome` is one of `Created(link) | Replayed(link)`. The HTTP layer maps `Created` to `201` and `Replayed` to `200`.
 
@@ -307,8 +320,8 @@ All operations are implemented as Commands or Queries using CQRS, executed throu
 - **Permission required:** `links:read`.
 - **Input:** `LinkId`, `actor`.
 - **Behaviour:**
-  - Load by id. If not found, return `Result.Fail(Error.NotFound)`.
-  - If `link.OwnerId != actor.Id` and the actor does not have `links:admin`, return `Result.Fail(Error.NotFound)` — not `Error.Forbidden`. (Surfacing "this link exists but you can't see it" leaks existence.)
+  - Load by id. If not found, return `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(id.ToString())))`.
+  - If `link.OwnerId != actor.Id` and the actor does not have `links:admin`, return `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(id.ToString())))` — not `Error.Forbidden`. (Surfacing "this link exists but you can't see it" leaks existence.)
   - Otherwise return `Result.Ok(LinkView)`.
 
 ### 6.4 Disable Link (Command)
@@ -316,10 +329,10 @@ All operations are implemented as Commands or Queries using CQRS, executed throu
 - **Permission required:** `links:write`.
 - **Input:** `LinkId`, `actor`.
 - **Behaviour:**
-  - Load + ownership-check per §6.3 (`Error.NotFound` if not owner and not admin).
+  - Load + ownership-check per §6.3 (`new Error.NotFound(ResourceRef.For<Link>(id.ToString()))` if not owner and not admin).
   - Call `link.Disable()`. The aggregate's `Disable()` is idempotent; if `IsActive` is already `false`, no event is raised and `SaveChanges` does no write.
   - Return `Result.Ok(LinkView)` with the post-call state (`isActive: false`).
-- **HTTP layer:** wraps the response with `WithLocation("GetLinkById", l => l.Id).WithVersionedRoute()`. In an unversioned host, `WithVersionedRoute` skips api-version injection and the emitted `Location` header is the plain `/links/{id}`. This is one of the lab's central alpha.305 tests.
+- **HTTP layer:** wraps the response with `WithLocation("GetLinkById", l => l.Id).WithVersionedRoute()`. In an unversioned host, `WithVersionedRoute` skips api-version injection and the emitted `Location` header is the plain `/links/{id}`. This is one of the lab's central unversioned-host regression tests.
 
 ### 6.5 Extend Link Expiry (Command)
 
@@ -334,14 +347,14 @@ All operations are implemented as Commands or Queries using CQRS, executed throu
 
 - **Permission required:** `links:write`.
 - **Input:** `LinkId`, `actor`.
-- **Behaviour:** Load + ownership-check per §6.3. Delete the link and all associated clicks (see §10 for cascade configuration). Return `Result.Ok`.
+- **Behaviour:** Load + ownership-check per §6.3. Delete the link, all associated clicks, and any associated `IdempotencyRecord` rows (the `IdempotencyRecord.LinkId` FK is cascade-configured; see §10). Return `Result.Ok()` (`Result<Trellis.Unit>`). After delete, replay of the same `Idempotency-Key` for the same owner returns `404 Not Found` (the referenced link no longer exists), matching the semantics of "the link was successfully deleted": replays cannot resurrect a deleted resource.
 
 ### 6.7 Get Link Stats (Query)
 
 - **Permission required:** `links:read`.
 - **Input:** `LinkId`, `actor`.
 - **Behaviour:**
-  - Ownership-check per §6.3 first — before any ETag work. A non-owner without `links:admin` receives `Result.Fail(Error.NotFound)` regardless of any `If-None-Match` header the caller sent. The ETag for a link is never echoed to a caller who is not entitled to see the link.
+  - Ownership-check per §6.3 first — before any ETag work. A non-owner without `links:admin` receives `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(id.ToString())))` regardless of any `If-None-Match` header the caller sent. The ETag for a link is never echoed to a caller who is not entitled to see the link.
   - Compute `LinkStats` from the `Clicks` table: `TotalClicks = COUNT(*)`, `FirstClickAt = MIN(ClickedAt)`, `LastClickAt = MAX(ClickedAt)`. A single aggregate-projection query, not a load-all-clicks-then-aggregate.
   - Return `Result.Ok(LinkStatsView)`.
 - **HTTP layer:** computes ETag deterministically from `(TotalClicks, LastClickTicks)`. If the request's `If-None-Match` matches AND the caller passed the ownership check, respond `304 Not Modified` and skip body serialisation entirely.
@@ -351,7 +364,7 @@ All operations are implemented as Commands or Queries using CQRS, executed throu
 - **Permission required:** none (anonymous).
 - **Input:** `ShortCode`, optional `UserAgent`, optional `Referer`.
 - **Behaviour:**
-  - Lookup by `ShortCode`. Not found → `Result.Fail(Error.NotFound)`. HTTP layer maps to `404`.
+  - Lookup by `ShortCode`. Not found → `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(shortCode.Value)))`. HTTP layer maps to `404`.
   - Eligible (active, not expired) → emit `RedirectOutcome.Redirect(originalUrl)`. HTTP layer maps to `302` with `Location` header.
   - Disabled or expired → emit `RedirectOutcome.Gone`. HTTP layer maps to `410 Gone`.
   - On `Redirect` (only): record a click via `RecordClickCommand`. The orchestrator wraps the click-recording call in a `try/catch`; any exception is logged at Warning and swallowed. The response status code is unaffected.
@@ -371,7 +384,7 @@ The contract for `POST /links`:
 - **`Idempotency-Key` header present:**
   - On first observation of `(OwnerId, key)`: create the link and the idempotency record in one transaction. Persist `CanonicalRequestJson` on the record. Respond `201 Created`.
   - On any subsequent observation of the same `(OwnerId, key)` **with the same `CanonicalRequestJson`**: do not create anything new. Look up the original link via the record, respond `200 OK` with that link's `LinkView` and `Location` header.
-  - On subsequent observation of the same `(OwnerId, key)` **with a different `CanonicalRequestJson`**: reject with `409 Conflict` (`Error.Conflict("idempotency-key-mismatch")`). No mutation.
+  - On subsequent observation of the same `(OwnerId, key)` **with a different `CanonicalRequestJson`**: reject with `409 Conflict` (`new Error.Conflict(null, "idempotency-key-mismatch")`). No mutation.
   - The response body of the replay must be byte-equivalent to the original `201` body *for requests served from the same effective scheme and host*. (`LinkView.shortUrl` depends on `HttpRequest.Scheme` and `HttpRequest.Host`; a replay through a different host naturally differs in `shortUrl`.) The lab's tests run against a single in-memory host so the same-host condition holds trivially; the spec calls it out to keep the contract precise.
 
 **Canonical-JSON serialization.** `CanonicalRequestJson` is built deterministically from the three input fields `(originalUrl, customShortCode, expiresAt)` so that two requests with the same intent but different JSON whitespace or key ordering compare equal. Implementations may use `System.Text.Json` with `JsonSerializerOptions { WriteIndented = false }` and a fixed property order (or any equivalent canonicalization scheme), as long as the comparison is stable across calls. The lab tests `idempotent replay with reordered keys` to pin this.
@@ -387,7 +400,7 @@ The list endpoint (`GET /links`) is cursor-paginated and exercises Trellis's `Pa
 - `cursor` — opaque token. First request omits it; subsequent requests pass back the previous response's `nextCursor` verbatim.
 - `limit` — integer. Defaults to 50. Maximum 100. Values outside `[1, 100]` produce `400 Bad Request` via ProblemDetails (a framework-level validation failure, surfaced as `Error.InvalidInput.ForField("limit", ...)`).
 - The response body is `{ items, nextCursor }`. `nextCursor` is omitted (not `null`) on the last page.
-- The `Link: <...>; rel="next"` header is constructed via `HttpContext.PageUrl(routeName: "ListLinks", ...)`. The lab requires use of this helper, not hand-built URLs. This is the central PageUrl alpha.305 test: `HttpContext.PageUrl` must compose cleanly in an unversioned host — it must not inject `api-version=` into the URL, and it must not throw on a target endpoint that has no `ApiVersionMetadata`.
+- The `Link: <...>; rel="next"` header is constructed via `HttpContext.PageUrl(routeName: "ListLinks", ...)`. The lab requires use of this helper, not hand-built URLs. This is the central `PageUrl` regression test: `HttpContext.PageUrl` must compose cleanly in an unversioned host — it must not inject `api-version=` into the URL, and it must not throw on a target endpoint that has no `ApiVersionMetadata`.
 - The `Link` header is absent on the last page.
 
 The choice of cursor (not numbered `page`/`pageSize`) is deliberate: `HttpContext.PageUrl(...)` is a cursor-based helper (returns `Func<Cursor, int, string>`). Numbered pagination would force hand-built URLs, defeating the PageUrl measurement.
@@ -408,7 +421,7 @@ The choice of cursor (not numbered `page`/`pageSize`) is deliberate: `HttpContex
 - The framework's `IActorProvider` may still yield a default actor in development (the template's `DevelopmentActorProvider` returns a default actor when no `X-Test-Actor` header is present; this is by design, see `Trellis.Asp.Authorization.DevelopmentActorProvider`). Anonymous endpoints simply do not read permissions off that actor; the request is served regardless of who (or whether) the actor provider reports.
 - An authenticated request to `/{shortCode}` is treated identically to an anonymous one. The redirect is independent of identity.
 
-**Ownership-versus-existence (§6.3 rule).** When an actor without `links:admin` requests a link they do not own, the response is `404 Not Found`, not `403 Forbidden`. Surfacing 403 leaks the existence of a link with that id. The handler returns `Result.Fail(Error.NotFound)` in both cases. This is a deliberate framework test: the spec asserts that the Trellis pattern of returning `Error.NotFound` from the handler (rather than `Error.Forbidden`) produces the right HTTP status without any special-case wiring.
+**Ownership-versus-existence (§6.3 rule).** When an actor without `links:admin` requests a link they do not own, the response is `404 Not Found`, not `403 Forbidden`. Surfacing 403 leaks the existence of a link with that id. The recommended implementation pattern is the v4 typed accessor pattern with `HideExistence<Link>()` (see §6.0 below) — the framework projects both `Error.NotFound` (link absent) and `Error.Forbidden` (link exists, not owner) to the same `404` shape at the response-mapping stage. Implementations that bypass the v4 pattern and return `new Error.NotFound(ResourceRef.For<Link>(id.ToString()))` manually from the handler are accepted for build correctness but score lower under §3.5 / §7.3 (framework-idiom rows).
 
 ## 10. Persistence
 
@@ -421,7 +434,9 @@ The choice of cursor (not numbered `page`/`pageSize`) is deliberate: `HttpContex
 - **Indexes:**
   - `Links(OwnerId, CreatedAt DESC)` — supports the owner-scoped list query.
   - `Clicks(LinkId, ClickedAt)` — supports stats aggregation.
-- **Cascade:** deleting a `Link` row cascades to its `Click` rows. Configured via EF Core `OnDelete(DeleteBehavior.Cascade)` on the `Link → Clicks` relationship.
+- **Cascade:**
+  - Deleting a `Link` row cascades to its `Click` rows. Configured via EF Core `OnDelete(DeleteBehavior.Cascade)` on the `Link → Clicks` relationship.
+  - Deleting a `Link` row also cascades to its `IdempotencyRecord` rows (FK `IdempotencyRecord.LinkId → Link.Id`). Configured via EF Core `OnDelete(DeleteBehavior.Cascade)` on the `Link → IdempotencyRecords` relationship. This eliminates the dangling-FK case after DELETE; replays of the same key for the same owner naturally return `404 Not Found` because the referenced link is gone.
 - **Enums** (none in this domain — `IsActive` is bool).
 - **`Maybe<T>` columns** (`ExpiresAt`, `UserAgent`, `RefererHost`) stored as nullable columns, round-tripping to `Maybe.None` when null.
 - **Database creation:** Use `EnsureCreated()` on startup in development mode. Do NOT use EF Core migrations.
@@ -451,18 +466,18 @@ The mediator pipeline maps each `Error` type to an HTTP response via `AddTrellis
 | Anonymous request to a `links:*` endpoint | (none — auth middleware short-circuits before the handler runs) | `401 Unauthorized` | `Error.AuthenticationRequired` |
 | Authenticated request missing the required permission | `Error.Forbidden(policyId, resource?)` from the auth filter | `403 Forbidden` | `Error.Forbidden` |
 | `POST /links` body invalid (`originalUrl` missing, scheme not http/https, `customShortCode` regex fail) | `Error.InvalidInput.ForField(...)` | `422 Unprocessable Entity` | `Error.InvalidInput` |
-| `POST /links` with `customShortCode` that already exists | `Error.Conflict(reasonCode?, resource?)` | `409 Conflict` | `Error.Conflict` |
-| `POST /links` with `Idempotency-Key` whose stored `CanonicalRequestJson` does not match the current request's canonical JSON | `Error.Conflict("idempotency-key-mismatch")` | `409 Conflict` | `Error.Conflict` |
-| System-generated short-code collisions exhausted retries | `Error.Unavailable("short-code-generation-exhausted")` | `503 Service Unavailable` | `Error.Unavailable` |
-| `GET /links?pageSize=200` (out of range) | `Error.InvalidInput.ForField("pageSize", ...)` | `400 Bad Request` (framework-level validation) | `Error.InvalidInput` |
-| `GET /links/{id}` where id doesn't exist OR is owned by another non-admin actor | `Error.NotFound` | `404 Not Found` | `Error.NotFound` |
-| `GET /{shortCode}` where short-code doesn't exist | `Error.NotFound` | `404 Not Found` | `Error.NotFound` |
-| `GET /{shortCode}` where link is disabled or expired | `Error.Gone(reasonCode)` *(if Trellis has a `Gone` error; else `Error.InvariantViolation("link-no-longer-active")` mapped explicitly to 410)* | `410 Gone` | `Error.Gone` or fallback |
+| `POST /links` with `customShortCode` that already exists | `new Error.Conflict(null, "short-code-taken")` | `409 Conflict` | `Error.Conflict` |
+| `POST /links` with `Idempotency-Key` whose stored `CanonicalRequestJson` does not match the current request's canonical JSON | `new Error.Conflict(null, "idempotency-key-mismatch")` | `409 Conflict` | `Error.Conflict` |
+| System-generated short-code collisions exhausted retries | `new Error.Unavailable("short-code-generation-exhausted")` | `503 Service Unavailable` | `Error.Unavailable` |
+| `GET /links?limit=200` (out of range) | `Error.InvalidInput.ForField("limit", ...)` | `400 Bad Request` (framework-level validation) | `Error.InvalidInput` |
+| `GET /links/{id}` where id doesn't exist OR is owned by another non-admin actor | `new Error.NotFound(ResourceRef.For<Link>(id))` | `404 Not Found` | `Error.NotFound` |
+| `GET /{shortCode}` where short-code doesn't exist | `new Error.NotFound(ResourceRef.For<Link>(shortCode))` | `404 Not Found` | `Error.NotFound` |
+| `GET /{shortCode}` where link is disabled or expired | `new Error.Gone(ResourceRef.For<Link>(shortCode))` | `410 Gone` | `Error.Gone` |
 | `PUT /links/{id}/expiry` with invalid `expiresAt` (not strictly later than current) | `Error.InvalidInput.ForField("expiresAt", ...)` | `422 Unprocessable Entity` | `Error.InvalidInput` |
 
 **On "idempotency-key-mismatch".** The strictest behaviour from RFC draft `idempotency-header-01` is: if the same key is reused with a *different* request body, reject with `409 Conflict`. The lab requires this strict behaviour. The `IdempotencyRecord` persists a `CanonicalRequestJson` field (§3.3) — a stable JSON serialization of the three input fields (`originalUrl`, `customShortCode`, `expiresAt`) — at the time of the original `201`. On replay, the handler compares the stored string against the canonical-JSON serialization of the current request. Equality → replay (200). Inequality → 409. Identity comparison on `OwnerId` is implicit (records are scoped per owner).
 
-**On `Error.Gone`.** Trellis may or may not ship a dedicated `Error.Gone` type. If it does, use it. If it does not, the lab accepts either (a) using `Error.NotFound` (treating disabled/expired as effectively absent) and not distinguishing 404 from 410 — this is a scoring deduction in the rubric for response-shape conformance, but acceptable for build correctness — or (b) hand-mapping a custom error type to status 410 in the response writer. Option (b) is preferred. The discovery of "the framework does not have a `Gone` type" is itself a `TRELLIS_FEEDBACK.md` entry.
+**On `Error.Gone`.** Trellis ships `Error.Gone(ResourceRef Resource)` as a first-class case in the `Error` taxonomy. Disabled/expired links must surface as `new Error.Gone(ResourceRef.For<Link>(shortCode))`, which the `AddTrellisProblemDetails` pipeline maps to `410 Gone` with the correct ProblemDetails shape. A 404 fallback for disabled/expired links is **not** acceptable — collapsing 410 into 404 hides the lifecycle-state signal from clients and is a deduction under §13.3 in the response-shape rubric.
 
 ## 13. Testing Requirements
 
@@ -480,7 +495,7 @@ Unit tests for value objects and aggregate rules. No external dependencies.
 
 Handler tests with fake repositories.
 
-- `CreateLinkCommand`: happy path with auto-generated code; happy path with custom code; conflict on custom code already taken; auto-code regeneration on collision (with a deterministic seed for the test); idempotency-key first observation; idempotency-key replay with same canonical body (returns same `LinkId`, raises no new event); idempotency-key replay with reordered JSON keys (still treated as same canonical body); idempotency-key reuse with different canonical body → `Error.Conflict("idempotency-key-mismatch")`.
+- `CreateLinkCommand`: happy path with auto-generated code; happy path with custom code; conflict on custom code already taken; auto-code regeneration on collision (with a deterministic seed for the test); idempotency-key first observation; idempotency-key replay with same canonical body (returns same `LinkId`, raises no new event); idempotency-key replay with reordered JSON keys (still treated as same canonical body); idempotency-key reuse with different canonical body → `new Error.Conflict(null, "idempotency-key-mismatch")`.
 - `ListMyLinksQuery`: owner-scoped filter; admin sees all; cursor/limit honoured; ordering by `CreatedAt DESC`.
 - `GetLinkByIdQuery`: own link returns 200; another's link returns `Error.NotFound` (not `Error.Forbidden`); admin sees another's link.
 - `DisableLinkCommand`: idempotent (second call is no-op success, no event); ownership check enforces `Error.NotFound` for non-owner non-admin.
@@ -505,7 +520,7 @@ Use `WebApplicationFactory` as normal.
 - `POST /links/{id}/disable`: 200 OK with `Location: /links/{id}` (no `?api-version=`); 404 for non-owner non-admin; idempotent (second call still 200 with the same body).
   - **The `WithVersionedRoute` test on the 200 path:** assert that the `Location` header value is `/links/{id}` with no query parameters appended. The implementation calls `.WithLocation(...).WithVersionedRoute()` — verify by source-grep: `.WithLocation(` chained with `.WithVersionedRoute(` must appear in the disable handler.
 - `GET /links`: 200 with body + `Link` header. The `Link` header value must not contain `api-version=`. Pagination via `cursor`/`limit` round-trips via `HttpContext.PageUrl(...)`.
-  - **The `HttpContext.PageUrl` test:** assert the `Link: <...>; rel="next"` header on the response is well-formed and contains no `api-version=` query parameter. Verify by source-grep that `HttpContext.PageUrl(` appears at least once in the list handler — the URL must come from the framework helper, not from hand concatenation. This is the central alpha.305 regression test against the lab.
+  - **The `HttpContext.PageUrl` test:** assert the `Link: <...>; rel="next"` header on the response is well-formed and contains no `api-version=` query parameter. Verify by source-grep that `HttpContext.PageUrl(` appears at least once in the list handler — the URL must come from the framework helper, not from hand concatenation. This is the central unversioned-host regression test against the lab.
 - `GET /links/{id}`: own link 200; another's link 404 (not 403); admin sees another's 200.
 - `PUT /links/{id}/expiry`: extension persists and round-trips; invalid expiry returns 422.
 - `DELETE /links/{id}`: 204; subsequent GET returns 404; clicks gone (§13.4).

@@ -20,8 +20,8 @@ The rubric L4 (`docs/evaluation-criteria.md` Level 4) actually scores against th
 | §2 | `Link.Extend` rejects new `ExpiresAt` ≤ current `ExpiresAt` |
 | §3 | `Link`: `ExpiresAt <= CreatedAt` rejected; `OriginalUrl` scheme non-http(s) rejected |
 | §3 | `Link`: `OwnerId`, `ShortCode`, `OriginalUrl` immutable after creation (verified by reflection or by absence of public setters) |
-| §4 | `CreateLinkCommand`: happy path with auto-generated code + happy path with custom code + collision on custom code + idempotency-key replay (same canonical body) returns same `LinkId` + idempotency-key reuse with different canonical body returns `Error.Conflict("idempotency-key-mismatch")` |
-| §4 | `GetLinkByIdQuery`: another's link returns `Error.NotFound`, not `Error.Forbidden` (existence-leak protection) |
+| §4 | `CreateLinkCommand`: happy path with auto-generated code + happy path with custom code + collision on custom code + idempotency-key replay (same canonical body) returns same `LinkId` + idempotency-key reuse with different canonical body returns `new Error.Conflict(null, "idempotency-key-mismatch")` |
+| §4 | `GetLinkByIdQuery`: another's link returns `new Error.NotFound(ResourceRef.For<Link>(id.Value))`, not `Error.Forbidden` (existence-leak protection); the implementation uses the v4 typed-accessor pattern (§3.5) — verified by inspection of `IServiceProvider` for `HideExistence<Link>()` configured and source-grep that `IAuthorizeResource<Link>` is declared on the query type |
 | §4 | `RedirectQuery`: disabled link → `Gone`; expired link → `Gone`; eligible → `Redirect(originalUrl)`; unknown → `NotFound` |
 | §4 | `RecordClickCommand`: failure does not bubble out of the redirect orchestrator (the response status is unchanged) |
 | §6 | `(OwnerId, IdempotencyKey)` storage-layer unique constraint produces a unique-violation that the handler catches and translates into a replay (200) for matching canonical bodies, or a 409 for mismatched canonical bodies — never a 500 |
@@ -52,6 +52,7 @@ For every scalar VO declared in the spec — `ShortCode`, `OriginalUrl`, `Idempo
 | `TryCreate` above high | `Result.Fail` with `Error.InvalidInput.ForField(...)` |
 | `TryCreate` null/empty/whitespace | `Result.Fail` |
 | Format / pattern violation | `Result.Fail`. `ShortCode` rejects characters outside `[A-Za-z0-9_-]`. `OriginalUrl` rejects non-http(s) schemes (`ftp://...`, `javascript:...`, relative URLs). `RefererHost` rejects strings that fail DNS-hostname format. `UserAgent` and `IdempotencyKey` are opaque — no format row required beyond length. |
+| Reserved-route short code | `ShortCode.TryCreate("links")` and `ShortCode.TryCreate("health")` (and case variants like `"Links"`, `"HEALTH"`) return `Result.Fail` with `Error.InvalidInput.ForField("shortCode", ...)`. These literals collide with the API's root routes at `/links` and `/health`; without rejection at the value-object boundary, a created link with such a code would be unreachable via the redirect path. |
 | Equality and `GetHashCode` | two VOs with identical inputs are equal; differing inputs are not equal |
 
 Reused Trellis built-ins (e.g., the framework's URL value object if used) do **not** need re-testing of their internal pattern rules — only that they integrate correctly into `Link`. Verify integration by constructing `Link` with a bad URL and asserting the failure surfaces with `Error.InvalidInput` for the right field.
@@ -87,6 +88,20 @@ For every transition on `Link` declared in spec §4:
 | `IdempotencyRecord`: required composite identity | construction requires both `OwnerId` and `IdempotencyKey`; either missing fails |
 | `IdempotencyRecord`: `CanonicalRequestJson` required | construction requires a non-null, non-empty canonical-JSON string; missing fails |
 
+## 3.5 Resource-authorization framework idiom — v4 typed accessor + HideExistence (`Application/tests` + `Api/tests`)
+
+Spec §6.0 mandates the Trellis v4 typed-accessor + `HideExistence<Link>()` pattern from `Trellis.Mediator` for every LinkId-scoped command/query (§6.3–§6.7). This section verifies the framework wiring, not just the externally observable 404. An implementation that achieves the right 404 via manual `if (not owner) return Error.NotFound` instead of the v4 pattern is accepted for build correctness but fails the rows below.
+
+| Coverage | Required |
+|---|---|
+| **`IAuthorizeResource<Link>` on LinkId-scoped messages** | `GetLinkByIdQuery`, `DisableLinkCommand`, `ExtendLinkExpiryCommand`, `DeleteLinkCommand`, `GetLinkStatsQuery` each declare `: IAuthorizeResource<Link>` and supply an `Authorize(Actor, Link)` body whose ownership-check returns `Result.Fail(new Error.Forbidden("links.not-owner-or-admin", ResourceRef.For<Link>(link.Id.Value)))` for non-owner non-admin and `Result.Ok()` otherwise. Verified by reflection over the message type for the interface marker, plus a direct call to `Authorize(...)` with a non-matching actor. |
+| **`IIdentifyResource<Link, LinkId>` on LinkId-scoped messages** | Same five messages also declare `: IIdentifyResource<Link, LinkId>` and project to the `LinkId` on the message. Verified by reflection. |
+| **Shared loader** | `LinkResourceLoader : SharedResourceLoaderById<Link, LinkId>` is registered in `Acl/src/DependencyInjection.cs`; the loader returns `Result.Ok(link)` when the EF `FindAsync` yields a value and `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(id.Value)))` when it does not. Verified by direct unit test against an in-memory `DbContext`. |
+| **`HideExistence<Link>()` configured** | The host composition root calls `services.AddResourceAuthorization(o => o.HideExistence<Link>())`. Verified by inspecting `IServiceProvider` for the `ResourceAuthorizationOptions` instance and asserting `Resolve(typeof(Link))` returns the `HideAsNotFound` exposure policy. |
+| **`HideExistence<Link>()` end-to-end behaviour** | A `GetLinkByIdQuery` whose `Authorize(...)` returns `Error.Forbidden` and a `GetLinkByIdQuery` whose `LinkResourceLoader` returns `Error.NotFound` produce **byte-identical** ProblemDetails responses (except for the `instance` URL — the request path). Verified by integration test sending two requests through `WebApplicationFactory` and diffing the response bodies. |
+| **`IAuthorizedResource<TCommand, Link>` in mutation handlers** | `DisableLinkCommandHandler`, `ExtendLinkExpiryCommandHandler`, `DeleteLinkCommandHandler` inject `IAuthorizedResource<TCommand, Link>` and call `.GetRequiredResource()` to obtain the already-loaded `Link` — they do **not** re-query the repository for the link. Verified by constructor inspection (the handler's constructor takes `IAuthorizedResource<TCommand, Link>`) and by spying the loader: across one full request, `LinkResourceLoader.GetByIdAsync` is invoked exactly **once**. Two invocations indicate a double-load and a regression of the load-once invariant. |
+| **Authorize delegation, no manual fallthrough** | The five LinkId-scoped handlers do **not** contain a manual `if (link.OwnerId != actor.Id && !actor.Permissions.Contains("links:admin")) return Result.Fail(...)` branch — the framework pipeline runs the check before the handler is invoked. Verified by source-grep against `Application/src/` for the offending `if`-pattern; zero matches is the binding contract. |
+
 ## 4. Command and query handlers (`Application/tests`)
 
 For `CreateLinkCommand`:
@@ -95,13 +110,13 @@ For `CreateLinkCommand`:
 |---|---|
 | Happy path — auto-generated code | `Link` persisted; `CreateLinkOutcome.Created(link)`; `ShortCode` matches generator constraints (length, charset) |
 | Happy path — custom code | persisted; `CreateLinkOutcome.Created(link)` with the requested `ShortCode` |
-| Custom code already taken | `Result.Fail(Error.Conflict)`; no `Link` row persisted; no `IdempotencyRecord` row persisted |
+| Custom code already taken | `Result.Fail(new Error.Conflict(null, "short-code-taken"))`; no `Link` row persisted; no `IdempotencyRecord` row persisted |
 | Auto-code collision and regeneration | fake generator returns a colliding code N times then a fresh one; final outcome is `Created`; exactly one `Link` row persisted |
 | Auto-code regeneration exhausted | fake generator always collides; outcome is `Result.Fail(Error.Unavailable("short-code-generation-exhausted"))`; no `Link` row persisted; no orphan `IdempotencyRecord` |
 | Idempotency-key first observation | `IdempotencyRecord` (with `CanonicalRequestJson` populated) and `Link` both persisted in one transaction; outcome `Created` |
 | Idempotency-key replay (same canonical body) | second call returns `Replayed(link)` with the same `LinkId`; no new `Link` or `IdempotencyRecord` row; no new domain event raised |
 | Idempotency-key replay (reordered JSON keys, same intent) | canonical serialization makes the two requests compare equal; outcome `Replayed(link)` with same `LinkId`; no mutation |
-| Idempotency-key reuse with different canonical body | second call returns `Result.Fail(Error.Conflict("idempotency-key-mismatch"))`; no mutation |
+| Idempotency-key reuse with different canonical body | second call returns `Result.Fail(new Error.Conflict(null, "idempotency-key-mismatch"))`; no mutation |
 | Idempotency-key from a **different owner** with the same key | succeeds; produces a distinct `Link` and a distinct `IdempotencyRecord` |
 | No idempotency-key, repeated identical request | each call produces a distinct `Link` (auto-generated codes differ) |
 | Transactional atomicity | simulate a database failure between adding the `Link` and `IdempotencyRecord` and committing; assert neither row persists |
@@ -121,9 +136,9 @@ For `GetLinkByIdQuery`:
 | Coverage | Required |
 |---|---|
 | Own link | 200 with `LinkView` |
-| Another's link, no `links:admin` | `Result.Fail(Error.NotFound)` — **not** `Error.Forbidden` |
+| Another's link, no `links:admin` | `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(id.Value)))` — **not** `Error.Forbidden` |
 | Another's link, with `links:admin` | 200 with `LinkView` |
-| Unknown id | `Result.Fail(Error.NotFound)` |
+| Unknown id | `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(id.Value)))` |
 
 For `DisableLinkCommand`:
 
@@ -131,7 +146,7 @@ For `DisableLinkCommand`:
 |---|---|
 | Disable active link | persisted; `LinkDisabledDomainEvent` raised; `IsActive` round-trips to false |
 | Disable already-disabled link | no-op success; **no event raised**; current `LinkView` returned |
-| Non-owner disable | `Result.Fail(Error.NotFound)` (not `Forbidden`); link state unchanged |
+| Non-owner disable | `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(id.Value)))` (not `Forbidden`); link state unchanged |
 | Admin disable on another's link | succeeds |
 
 For `ExtendLinkExpiryCommand`:
@@ -141,16 +156,17 @@ For `ExtendLinkExpiryCommand`:
 | Extend with valid future value | `LinkExpiryExtendedDomainEvent` raised; `ExpiresAt` updated |
 | Extend with value ≤ current `ExpiresAt` | `Result.Fail(Error.InvalidInput.ForField("expiresAt", ...))`; no mutation |
 | Extend with value ≤ now | `Result.Fail(Error.InvalidInput.ForField("expiresAt", ...))`; no mutation |
-| Non-owner extend | `Result.Fail(Error.NotFound)`; no mutation |
+| Non-owner extend | `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(id.Value)))`; no mutation |
 | Admin extend on another's link | succeeds |
 
 For `DeleteLinkCommand`:
 
 | Coverage | Required |
 |---|---|
-| Own link | deleted; subsequent `GetLinkByIdQuery` returns `Error.NotFound` |
+| Own link | deleted; subsequent `GetLinkByIdQuery` returns `new Error.NotFound(ResourceRef.For<Link>(id.Value))` |
 | Cascade to clicks | a `Link` with N clicks deletes both the link row and all N click rows |
-| Non-owner delete | `Result.Fail(Error.NotFound)`; link still exists |
+| Cascade to idempotency records | a `Link` created with an `Idempotency-Key` has a matching `IdempotencyRecord` row; deleting the link also removes that record; a follow-up `POST /links` with the same `Idempotency-Key` and the same canonical body succeeds with a brand-new `201` (not a replay 200), because the original record is gone |
+| Non-owner delete | `Result.Fail(new Error.NotFound(ResourceRef.For<Link>(id.Value)))`; link still exists |
 | Admin delete on another's link | succeeds |
 
 For `GetLinkStatsQuery`:
@@ -160,7 +176,7 @@ For `GetLinkStatsQuery`:
 | Zero clicks | `TotalClicks = 0`; `FirstClickAt = None`; `LastClickAt = None` |
 | Multiple clicks | `TotalClicks` correct; `FirstClickAt = MIN`; `LastClickAt = MAX` |
 | Single click | `FirstClickAt == LastClickAt` |
-| Non-owner | `Error.NotFound` (existence-leak rule); the projection query is **not** executed (verified by repository spy / hit counter) |
+| Non-owner | `new Error.NotFound(ResourceRef.For<Link>(id.Value))` (existence-leak rule); the projection query is **not** executed (verified by repository spy / hit counter) |
 | Admin | sees another's stats |
 
 For `RedirectQuery`:
@@ -201,9 +217,9 @@ Authorisation matrix (run as a parameterised test per handler). The "Anonymous" 
 
 | Coverage | Required |
 |---|---|
-| Storage-layer composite unique | `(OwnerId, IdempotencyKey)` second insert raises EF Core unique-violation; handler catches and reports `Replayed(link)` for matching canonical body, or `Error.Conflict("idempotency-key-mismatch")` for mismatched canonical body |
+| Storage-layer composite unique | `(OwnerId, IdempotencyKey)` second insert raises EF Core unique-violation; handler catches and reports `Replayed(link)` for matching canonical body, or `new Error.Conflict(null, "idempotency-key-mismatch")` for mismatched canonical body |
 | Cross-owner key reuse | same key from a different `OwnerId` succeeds; produces a distinct `IdempotencyRecord` |
-| Canonical-body equivalence | replays with a body that differs in ordering of keys are still treated as equivalent (canonical-JSON comparison); replays with a body that differs in a value field are rejected with `Error.Conflict("idempotency-key-mismatch")` |
+| Canonical-body equivalence | replays with a body that differs in ordering of keys are still treated as equivalent (canonical-JSON comparison); replays with a body that differs in a value field are rejected with `new Error.Conflict(null, "idempotency-key-mismatch")` |
 | `CanonicalRequestJson` persisted | the value stored on the original `201` record is exactly the canonical serialization of the three input fields; round-trips through `Acl/tests` |
 | Transactional all-or-nothing | a forced failure between adding the entities and committing rolls back both; a subsequent retry with the same key succeeds as a fresh first-observation |
 | Concurrent first-attempt race | two simulated concurrent first-attempt POSTs with the same `(OwnerId, key)` and same canonical body → one succeeds with `Created`; the other catches the unique-violation, compares canonical bodies (equal), and returns `Replayed` with the same `LinkId` |
@@ -309,6 +325,7 @@ For every aggregate root and every owned VO:
 | Composite unique index on `IdempotencyRecords(OwnerId, IdempotencyKey)` | second insert of same pair fails with EF Core unique-constraint violation; different pair succeeds |
 | Unique index on `Links(ShortCode)` | second insert of same `ShortCode` fails with EF Core unique-constraint violation |
 | Cascade `Link → Click` | deleting a `Link` deletes its `Click` rows |
+| Cascade `Link → IdempotencyRecord` | deleting a `Link` deletes its `IdempotencyRecord` rows |
 | Index `Links(OwnerId, CreatedAt DESC)` | declared in the model; verified via `Model` inspection or schema dump |
 | Index `Clicks(LinkId, ClickedAt)` | declared in the model; verified via `Model` inspection or schema dump |
 
