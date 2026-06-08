@@ -87,17 +87,21 @@ Each lab is scored against its own checklist. The OM lab uses the original 57-cr
 
 **Passing score (OM lab): 52+/57.** Per-lab thresholds are documented in each operator guide.
 
-### Historical Order Management baselines
+### Order Management baselines — Trellis `3.0.0-alpha.360` (2026-06-08)
 
-> The scores below are historical baselines from the alpha.104/106 era. Current Trellis is `3.0.0-alpha.360`; running these models against the current framework + current checklist is a planned re-baseline.
+| AI Model | Score | Verdict |
+|----------|-------|---------|
+| Claude Opus 4.8 | 55/57 (96%) | **PASS** |
+| Claude Sonnet 4.6 | 55/57 (96%) | **PASS** |
+| Claude Opus 4.7 (1M ctx) | 54/57 (95%) | **PASS** |
+| GPT-5.5 | 53/57 (93%) | **PASS** |
+| Claude Haiku 4.5 | 42/57 (74%) | **FAIL** |
 
-| AI Model | Trellis | Score | Verdict |
-|----------|---------|-------|---------|
-| Claude Opus 4.6 | alpha.104 | 53/57 (93%) | **PASS** |
-| GPT-5.4 | alpha.106 | 45/57 (79%) | **FAIL** |
-| Claude Sonnet 4.6 | alpha.106 | 55/57 (96%) | **PASS** |
+Top four cluster 53–55/57. Every passing model lost the same point on **L2.11** ("ParallelAsync for draft-order loads") because that criterion conflicts with cookbook Recipe 21 — parallelizing two repos that share a scoped `DbContext` races EF Core. **Opus 4.8** was the only model to flag the rubric/cookbook contradiction explicitly. **Sonnet 4.6** was the only model to use both `Trellis.Testing` assertion extensions (`.Should().BeSuccess()` AND `.Should().HaveValue()`) systematically. Reference run on disk: [`after/OrderManagement/`](after/OrderManagement/) (Opus 4.7 1M).
 
-Full historical results: **[results/evaluation-results.md](results/evaluation-results.md)**. Mistakes pattern log: **[results/ai-mistakes-log.md](results/ai-mistakes-log.md)**.
+**Historical (alpha.104/106) for diff reference only — kept in [results/evaluation-results.md](results/evaluation-results.md):** Opus 4.6 53/57 PASS · Sonnet 4.6 55/57 PASS · GPT-5.4 45/57 FAIL. Direct cross-era comparison isn't apples-to-apples because the v4 typed-accessor pattern, the `Trellis.Mediator.FluentValidation` package split, and the `Error.Conflict` reason-code requirement all changed underneath the rubric.
+
+Full per-model scorecards with criterion-by-criterion findings: **[results/evaluation-results.md](results/evaluation-results.md)**. Mistakes pattern log: **[results/ai-mistakes-log.md](results/ai-mistakes-log.md)**.
 
 ## Observability
 
