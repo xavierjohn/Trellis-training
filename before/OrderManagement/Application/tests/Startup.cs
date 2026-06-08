@@ -1,7 +1,8 @@
 ﻿namespace Application.Tests;
 
-using OrderManagement.Application;
 using Microsoft.Extensions.Hosting;
+using OrderManagement.Application;
+
 public class Startup
 {
     public static void ConfigureHost(IHostBuilder hostBuilder) =>
@@ -9,6 +10,6 @@ public class Startup
             .ConfigureServices((context, services) =>
             {
                 services.AddApplication()
-                .AddMockAntiCorruptionLayer();
+                .AddMockDependencies();
             });
 }

@@ -1,45 +1,56 @@
 ﻿namespace Api.Tests;
 
-using System;
-using Application.Tests;
-using OrderManagement.Application.Abstractions;
 using MartinCostello.Logging.XUnit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Xunit.Sdk;
+using OrderManagement.AntiCorruptionLayer;
+using Trellis.EntityFrameworkCore;
+using Trellis.Testing;
+using Trellis.Testing.AspNetCore;
 using Xunit.v3;
 
 public class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>, ITestOutputHelperAccessor
 {
-    private readonly bool _useRealServices;
+    private readonly SqliteConnection? _connection;
+    private static bool UseRealServices =>
+        string.Equals(Environment.GetEnvironmentVariable("USE_REAL_SERVICES"), "true", StringComparison.OrdinalIgnoreCase);
 
     public TestWebApplicationFactoryFixture()
     {
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
 
-        _useRealServices = Environment.GetEnvironmentVariable("USE_REAL_SERVICES") == "true";
-        if (_useRealServices)
-            TestContext.Current.SendDiagnosticMessage("Using real services");
-        else
-            TestContext.Current.SendDiagnosticMessage("Using mock services");
+        if (!UseRealServices)
+        {
+            // Keep a persistent connection for in-memory SQLite
+            _connection = new SqliteConnection("Data Source=:memory:");
+            _connection.Open();
+        }
     }
 
     public ITestOutputHelper? OutputHelper { get; set; }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.ConfigureLogging((p) => p.AddXUnit(this));
+        builder.ConfigureLogging(p => p.AddXUnit(this));
+
+        if (UseRealServices)
+            return;
 
         builder.ConfigureServices(services =>
-            {
-                if (_useRealServices)
-                    return;
+            services.ReplaceDbProvider<AppDbContext>(options =>
+                options.UseSqlite(_connection!)
+                       .AddTrellisInterceptors()));
+    }
 
-                services.RemoveAll<IWeatherForecastService>();
-                services.AddMockAntiCorruptionLayer();
-            });
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing)
+            _connection?.Dispose();
     }
 }
 
