@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!--
+      Suppress CS1591 "Missing XML comment" inside the API project. Controllers carry
+      XML doc summaries; DTO record properties intentionally do not, because every
+      property name corresponds 1:1 to a Trellis primitive in the Domain layer (which
+      already carries the canonical XML doc) and the OpenAPI document is generated from
+      the response/request shapes directly. Re-documenting every property here would
+      duplicate the Domain doc without adding new information.
+    -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Asp.Versioning.OpenApi" />
+    <PackageReference Include="Trellis.Asp" />
+    <PackageReference Include="Trellis.Asp.ApiVersioning" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="Scalar.AspNetCore" />
+    <PackageReference Include="Scalar.AspNetCore.Microsoft" />
+    <PackageReference Include="Trellis.ServiceLevelIndicators.Asp.ApiVersioning" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Acl\src\AntiCorruptionLayer.csproj" />
+    <ProjectReference Include="..\..\Application\src\Application.csproj" />
+  </ItemGroup>
+
+</Project>
