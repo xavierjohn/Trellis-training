@@ -87,17 +87,17 @@ Each lab is scored against its own checklist. The OM lab uses the original 57-cr
 
 **Passing score (OM lab): 52+/57.** Per-lab thresholds are documented in each operator guide.
 
-### Order Management baselines — Trellis `3.0.0-alpha.360` (2026-06-08)
+### Order Management baselines — Trellis `3.0.0-alpha.360` (2026-06-08, rescored after L2.11 rubric fix)
 
 | AI Model | Score | Verdict |
 |----------|-------|---------|
-| Claude Opus 4.8 | 55/57 (96%) | **PASS** |
-| Claude Sonnet 4.6 | 55/57 (96%) | **PASS** |
-| Claude Opus 4.7 (1M ctx) | 54/57 (95%) | **PASS** |
-| GPT-5.5 | 53/57 (93%) | **PASS** |
-| Claude Haiku 4.5 | 42/57 (74%) | **FAIL** |
+| Claude Opus 4.8 | 56/57 (98%) | **PASS** |
+| Claude Sonnet 4.6 | 56/57 (98%) | **PASS** |
+| Claude Opus 4.7 (1M ctx) | 55/57 (96%) | **PASS** |
+| GPT-5.5 | 54/57 (95%) | **PASS** |
+| Claude Haiku 4.5 | 43/57 (75%) | **FAIL** |
 
-Top four cluster 53–55/57. Every passing model lost the same point on **L2.11** ("ParallelAsync for draft-order loads") because that criterion conflicts with cookbook Recipe 21 — parallelizing two repos that share a scoped `DbContext` races EF Core. **Opus 4.8** was the only model to flag the rubric/cookbook contradiction explicitly. **Sonnet 4.6** was the only model to use both `Trellis.Testing` assertion extensions (`.Should().BeSuccess()` AND `.Should().HaveValue()`) systematically. Reference run on disk: [`after/OrderManagement/`](after/OrderManagement/) (Opus 4.7 1M).
+Top four cluster 54–56/57. The rubric's **L2.11** was rewritten in this PR — it previously asked for `ParallelAsync` on the draft-order load, which contradicted cookbook Recipe 21 (parallelizing two repos that share a scoped `DbContext` races EF Core). All five models had used the framework-correct batched load (`FindManyByIdAsync`), so the fix produced +1 each. **Opus 4.8** was the only model to flag the contradiction in its TRELLIS_FEEDBACK before the fix; **Sonnet 4.6** was the only model to use both `Trellis.Testing` assertion extensions (`.Should().BeSuccess()` AND `.Should().HaveValue()`) systematically. Reference run on disk: [`after/OrderManagement/`](after/OrderManagement/) (Opus 4.7 1M).
 
 **Historical (alpha.104/106) for diff reference only — kept in [results/evaluation-results.md](results/evaluation-results.md):** Opus 4.6 53/57 PASS · Sonnet 4.6 55/57 PASS · GPT-5.4 45/57 FAIL. Direct cross-era comparison isn't apples-to-apples because the v4 typed-accessor pattern, the `Trellis.Mediator.FluentValidation` package split, and the `Error.Conflict` reason-code requirement all changed underneath the rubric.
 
