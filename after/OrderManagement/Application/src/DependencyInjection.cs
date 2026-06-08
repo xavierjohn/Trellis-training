@@ -17,10 +17,11 @@ public static class DependencyInjection
         services.AddDomainEventDispatch(typeof(CreateDraftOrderCommandHandler).Assembly);
         services.AddTrellisFluentValidation(typeof(CreateDraftOrderCommandValidator).Assembly);
 
-        // Resource authorization for ownership-checked cancel (spec §5.4). Registers
-        // both the pipeline behavior and the v4 IAuthorizedResource<TMessage, TResource>
-        // accessor used by CancelOrderCommandHandler to skip a duplicate Order load.
-        services.AddResourceAuthorization<CancelOrderCommand, Order, Result<Order>>();
+        // Resource authorization for ownership-checked cancel (spec §5.4). The
+        // assembly-scan overload also wires the IIdentifyResource → SharedResourceLoaderById
+        // bridge and registers the v4 IAuthorizedResource<TMessage, TResource> accessor
+        // used by CancelOrderCommandHandler to skip a duplicate Order load.
+        services.AddResourceAuthorization(typeof(CancelOrderCommand).Assembly);
 
         return services;
     }

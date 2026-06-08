@@ -68,7 +68,27 @@ internal static class DependencyInjection
         services.AddHealthChecks();
 
         if (environment.IsDevelopment())
-            services.AddDevelopmentActorProvider();
+            services.AddDevelopmentActorProvider(options =>
+            {
+                // Spec §5.5: when no X-Test-Actor header is present, fall back to a
+                // default admin actor that holds every OM permission so casual probes
+                // (e.g. /openapi inspection or hand-curled scripts) don't see 403.
+                options.DefaultActorId = "development-admin";
+                options.DefaultPermissions = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    Permissions.CustomersCreate,
+                    Permissions.ProductsCreate,
+                    Permissions.ProductsManageStock,
+                    Permissions.OrdersCreate,
+                    Permissions.OrdersSubmit,
+                    Permissions.OrdersApprove,
+                    Permissions.OrdersShip,
+                    Permissions.OrdersDeliver,
+                    Permissions.OrdersCancel,
+                    Permissions.OrdersRead,
+                    Permissions.OrdersReadAll,
+                };
+            });
         else
             throw new InvalidOperationException(
                 "Production IActorProvider not configured. " +
