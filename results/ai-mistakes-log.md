@@ -102,7 +102,7 @@ For each entry, assess whether an instruction improvement would be **generalizab
 - **Category:** Pattern
 - **Models affected:** Sonnet 4.6 Run 2
 - **Self-corrected?** No
-- **What happened:** All handlers use imperative `if (!result.TryGetValue(out var value)) { _ = result.TryGetError(out var error); return error; }` patterns instead of ROP chains with `Bind`/`BindAsync`/`Map`/`Tap`. The Bind API from `Trellis.Results` is not used anywhere in custom code (only in template's WeatherForecastController).
+- **What happened:** All handlers use imperative `if (!result.TryGetValue(out var value)) { _ = result.TryGetError(out var error); return error; }` patterns instead of ROP chains with `Bind`/`BindAsync`/`Map`/`Tap`. The `Bind` API from `Trellis.Core` (which provides `Result<T>` and the pipeline operators — formerly distributed as `Trellis.Results`) is not used anywhere in custom code (only in template's WeatherForecastController).
 - **Root cause:** Per the model's TRELLIS_FEEDBACK.md (FP-1), the TRLS004 analyzer does not recognize `!TryGetValue(out var v)` as an `IsFailure` guard, forcing the verbose `TryGetError` workaround. The model likely attempted Bind first, hit the analyzer friction, and fell back to the imperative pattern across all handlers.
 - **Generalizable?** Yes — any handler composing multiple Result operations benefits from Bind/BindAsync chains. The analyzer gap is a real framework issue.
 - **Potential instruction fix:** Two options: (1) Add explicit Bind/BindAsync usage examples in the copilot instructions handler section, showing the preferred ROP chain pattern. (2) Fix TRLS004 analyzer to recognize `!TryGetValue` as an `IsFailure` guard, reducing the friction that pushes models to imperative fallback.

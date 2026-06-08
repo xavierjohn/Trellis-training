@@ -571,14 +571,14 @@ The Level 6 criteria specifically measure whether the architecture and copilot i
 
 | Package | How It's Exercised |
 |---------|--------------------|
-| `Trellis.Results` | Result\<T\> on every operation, Maybe\<T\> for optionals, error types, Combine, Bind, Map, Tap, Match, MatchError, ParallelAsync |
-| `Trellis.Primitives` | RequiredString, RequiredGuid (V7), RequiredInt, RequiredDecimal, RequiredEnum, EmailAddress, PhoneNumber |
-| `Trellis.Primitives.Generator` | Source-generated TryCreate, equality, JSON converters for value objects |
-| `Trellis.DomainDrivenDesign` | Aggregate\<T\>, Entity\<T\>, Specification\<T\>, domain events |
-| `Trellis.Stateless` | Order state machine with Result-returning FireResult |
-| `Trellis.Analyzers` | Compile-time ROP correctness checks |
-| `Trellis.Asp` | ToActionResult(this), ToCreatedAtActionResult for 201+Location, Problem Details, scalar value binding |
-| `Trellis.Authorization` | Actor, IActorProvider, IAuthorize (permissions), IAuthorizeResource (cancel ownership) |
-| `Trellis.Mediator` | Commands, Queries, ValidationBehavior, AuthorizationBehavior, ResourceAuthorizationBehavior |
-| `Trellis.EntityFrameworkCore` | ApplyTrellisConventions, SaveChangesResultAsync, FirstOrDefaultMaybeAsync, .Where(spec) |
-| `Trellis.Testing` | `.Should().BeSuccess()`, `.Should().BeFailure()`, `.Should().BeFailureOfType<T>()`, `.Should().HaveValue()`, `.Should().BeNone()`, `FakeRepository`, `ResultBuilder`, `ValidationErrorBuilder` |
+| `Trellis.Core` | `Result<T>` on every operation, `Maybe<T>` for optionals, error types, `Combine`, `Bind`, `Map`, `Tap`, `Match`, `MatchError`, `ParallelAsync`. Also ships the DDD primitives (`Aggregate<TId>`, `Entity<TId>`, `Specification<T>`, `ValueObject`, `ScalarValueObject<TSelf, T>`, `RequiredString<TSelf>`, `RequiredGuid<TSelf>`, etc.) and the source generators that emit `TryCreate` / equality / JSON converters for value objects. |
+| `Trellis.Primitives` | Ready-to-use concrete value objects: `EmailAddress`, `PhoneNumber`, `Money`, `MonetaryAmount`, `CurrencyCode`, `CountryCode`, `LanguageCode`, `Hostname`, `IpAddress`, `Url`, `Percentage`, `Slug`, `Age` — plus the JSON / tracing infrastructure that powers them. |
+| `Trellis.StateMachine` | `Order` state machine with `Result`-returning `FireResult()` extension over Stateless. |
+| `Trellis.Analyzers` | Compile-time `Result` / `Maybe` / EF Core correctness checks. |
+| `Trellis.Asp` | `ToHttpResponse(...)`, `CreatedAtRoute(...)` for 201+Location, Problem Details, scalar value binding, ASP.NET actor providers (Claims, Entra, Development). |
+| `Trellis.Authorization` | `Actor`, `IActorProvider`, `IAuthorize` (permissions), `IAuthorizeResource` (ownership), `IIdentifyResource`, `IAuthorizedResource<TMessage, TResource>` (v4 typed accessor). |
+| `Trellis.Mediator` | Commands, Queries, `ValidationBehavior`, `AuthorizationBehavior`, `ResourceAuthorizationBehavior`, `HideExistence<T>()`. |
+| `Trellis.EntityFrameworkCore` | `ApplyTrellisConventions`, `SaveChangesResultAsync`, `FirstOrDefaultMaybeAsync`, `.Where(spec)`. |
+| `Trellis.Testing` | `.Should().BeSuccess()`, `.Should().BeFailure()`, `.Should().BeFailureOfType<T>()`, `.Should().HaveValue()`, `.Should().BeNone()`, `FakeRepository`, `ResultBuilder`, `ValidationErrorBuilder`. |
+
+> **Note:** earlier versions of this guide listed `Trellis.Results`, `Trellis.Primitives.Generator`, `Trellis.DomainDrivenDesign`, and `Trellis.Stateless` as separate packages. Those names are obsolete on nuget.org. `Trellis.Results` / `Trellis.DomainDrivenDesign` / `Trellis.Primitives.Generator` were consolidated into [`Trellis.Core`](https://www.nuget.org/packages/Trellis.Core); `Trellis.Stateless` was renamed to [`Trellis.StateMachine`](https://www.nuget.org/packages/Trellis.StateMachine).
