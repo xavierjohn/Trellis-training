@@ -1,4 +1,7 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\src\AntiCorruptionLayer.csproj" />
   </ItemGroup>

@@ -1,248 +1,152 @@
-﻿@host = {{host}}
-@apiVersion = {{apiVersion}}
+### Create a todo (admin)
+# Idempotency-Key opts this POST into the IETF idempotency middleware;
+# {{$guid}} generates a fresh key per call so retries are not replayed.
+# dueDate is computed at request time so the example never goes stale.
+# @name createTodo
+POST {{host}}/api/Todos?api-version={{apiVersion}}
+Content-Type: application/json
+Idempotency-Key: {{$guid}}
+X-Test-Actor: {{adminActor}}
 
-### ===== HEALTH CHECK =====
+{
+  "title": "Buy groceries",
+  "dueDate": "{{$datetime iso8601 30 d}}",
+  "tag": "shopping"
+}
 
-GET {{host}}/health
+### Create a todo without tag
+POST {{host}}/api/Todos?api-version={{apiVersion}}
+Content-Type: application/json
+Idempotency-Key: {{$guid}}
+X-Test-Actor: {{adminActor}}
 
-### ===== CUSTOMERS =====
+{
+  "title": "Finish quarterly report",
+  "dueDate": "{{$datetime iso8601 14 d}}"
+}
 
-### Create a customer (happy path)
-# @name createCustomer
-POST {{host}}/api/Customers?api-version={{apiVersion}}
+### Get todo by ID
+GET {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{userActor}}
+
+### Get overdue todos
+GET {{host}}/api/Todos/overdue?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{userActor}}
+
+### Update todo (PUT — body-overwriting mutation, requires If-Match)
+PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+If-Match: {{createTodo.response.headers.ETag}}
+
+{
+  "title": "Buy organic groceries",
+  "dueDate": "{{$datetime iso8601 45 d}}",
+  "tag": "health"
+}
+
+### Update todo with past due date (→ 422 from DueDate value-object validation)
+PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+If-Match: {{createTodo.response.headers.ETag}}
+
+{
+  "title": "Too late",
+  "dueDate": "2020-01-01T12:00:00Z"
+}
+
+### Complete todo (by creator) — body-less state-transition POST, no If-Match required
+POST {{host}}/api/Todos/{{createTodo.response.body.id}}/complete?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Complete todo (by non-creator → 403 Forbidden via IAuthorize)
+POST {{host}}/api/Todos/{{createTodo.response.body.id}}/complete?api-version={{apiVersion}}
+X-Test-Actor: {{userActor}}
+
+### Complete an already-completed todo (→ 422 from state machine guard)
+# Run the "Complete todo (by creator)" request above first, then this one.
+POST {{host}}/api/Todos/{{createTodo.response.body.id}}/complete?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Delete todo (requires If-Match — destructive mutation)
+# NOTE: after Update + Complete above, createTodo's ETag is stale; copy the latest
+# ETag from a fresh GET response into this If-Match header before sending, or this
+# request will return 412 Precondition Failed.
+DELETE {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+If-Match: {{createTodo.response.headers.ETag}}
+
+### Get deleted todo (→ 404)
+GET {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{userActor}}
+
+### Bad Request — empty title (→ 422 from Title value-object validation)
+POST {{host}}/api/Todos?api-version={{apiVersion}}
+Content-Type: application/json
+Idempotency-Key: {{$guid}}
+X-Test-Actor: {{adminActor}}
+
+{
+  "title": "",
+  "dueDate": "{{$datetime iso8601 30 d}}"
+}
+
+### Bad Request — invalid tag (→ 422 from Tag value-object validation)
+POST {{host}}/api/Todos?api-version={{apiVersion}}
+Content-Type: application/json
+Idempotency-Key: {{$guid}}
+X-Test-Actor: {{adminActor}}
+
+{
+  "title": "Test invalid tag",
+  "dueDate": "{{$datetime iso8601 30 d}}",
+  "tag": "INVALID TAG"
+}
+
+### Not Found — nonexistent todo (→ 404 with ResourceRef)
+GET {{host}}/api/Todos/00000000-0000-0000-0000-000000000001?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{userActor}}
+
+### Throw — demonstrates the ASP.NET exception handling pipeline (UseExceptionHandler + ProblemDetails)
+GET {{host}}/api/Todos/throw?api-version={{apiVersion}}
+Accept: application/json
+
+### Fault — demonstrates Error.Unexpected mapping with a stable fault id (no exception thrown)
+GET {{host}}/api/Todos/fault?api-version={{apiVersion}}
+Accept: application/json
+
+###############################################
+# RFC 9110 — Conditional Request Examples
+###############################################
+
+### GET with If-None-Match — 304 Not Modified when ETag matches
+GET {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{userActor}}
+If-None-Match: {{createTodo.response.headers.ETag}}
+
+### PUT with stale If-Match — 412 Precondition Failed
+PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+If-Match: "stale-etag-value"
+
+{
+  "title": "This should fail",
+  "dueDate": "{{$datetime iso8601 30 d}}"
+}
+
+### PUT without If-Match — 428 Precondition Required (RequireETag fires on missing header)
+PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
 Content-Type: application/json
 X-Test-Actor: {{adminActor}}
 
 {
-  "firstName": "John",
-  "lastName": "Doe",
-  "email": "john.doe@example.com",
-  "phoneNumber": "+15551234567",
-  "shippingAddress": {
-    "street": "123 Main St",
-    "city": "Seattle",
-    "state": "WA",
-    "postalCode": "98101",
-    "country": "US"
-  }
+  "title": "Missing If-Match",
+  "dueDate": "{{$datetime iso8601 30 d}}"
 }
-
-### Get customer by ID
-GET {{host}}/api/Customers/{{createCustomer.response.body.id}}?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### Create customer - duplicate email (409 Conflict)
-POST {{host}}/api/Customers?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "firstName": "Jane",
-  "lastName": "Doe",
-  "email": "john.doe@example.com",
-  "shippingAddress": {
-    "street": "456 Oak Ave",
-    "city": "Portland",
-    "state": "OR",
-    "postalCode": "97201",
-    "country": "US"
-  }
-}
-
-### Create customer - invalid email (400 Bad Request)
-POST {{host}}/api/Customers?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "firstName": "Bad",
-  "lastName": "Email",
-  "email": "not-an-email",
-  "shippingAddress": {
-    "street": "789 Pine St",
-    "city": "Anytown",
-    "state": "WA",
-    "postalCode": "98052",
-    "country": "US"
-  }
-}
-
-### ===== PRODUCTS =====
-
-### Create a product (happy path)
-# @name createProduct
-POST {{host}}/api/Products?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "productName": "Widget Pro",
-  "sku": "WDGPRO001",
-  "unitPrice": 29.99
-}
-
-### Get product by ID
-GET {{host}}/api/Products/{{createProduct.response.body.id}}?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### Create product - duplicate SKU (409 Conflict)
-POST {{host}}/api/Products?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "productName": "Another Widget",
-  "sku": "WDGPRO001",
-  "unitPrice": 19.99
-}
-
-### Create product - zero price (400 Bad Request)
-POST {{host}}/api/Products?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "productName": "Free Item",
-  "sku": "FREE001",
-  "unitPrice": 0
-}
-
-### Add stock to product
-# @name addStock
-POST {{host}}/api/Products/{{createProduct.response.body.id}}/stock-additions?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "quantity": 100
-}
-
-### ===== ORDERS =====
-
-### Create a draft order (happy path)
-# @name createOrder
-POST {{host}}/api/Orders?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "customerId": "{{createCustomer.response.body.id}}",
-  "lineItems": [
-    {
-      "productId": "{{createProduct.response.body.id}}",
-      "quantity": 3
-    }
-  ]
-}
-
-### Get order by ID
-GET {{host}}/api/Orders/{{createOrder.response.body.id}}?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### Get order - nonexistent ID (404 Not Found)
-GET {{host}}/api/Orders/00000000-0000-0000-0000-000000000000?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### Add line item to draft order (need a second product first)
-# @name createProduct2
-POST {{host}}/api/Products?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "productName": "Gadget",
-  "sku": "GDG001",
-  "unitPrice": 49.99
-}
-
-###
-POST {{host}}/api/Products/{{createProduct2.response.body.id}}/stock-additions?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "quantity": 50
-}
-
-### Add line item
-POST {{host}}/api/Orders/{{createOrder.response.body.id}}/line-items?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "productId": "{{createProduct2.response.body.id}}",
-  "quantity": 2
-}
-
-### Remove line item (use a line item ID from the order response)
-# DELETE {{host}}/api/Orders/{{createOrder.response.body.id}}/line-items/{lineItemId}?api-version={{apiVersion}}
-# X-Test-Actor: {{adminActor}}
-
-### Submit order
-# @name submitOrder
-POST {{host}}/api/Orders/{{createOrder.response.body.id}}/submission?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### List orders by customer
-GET {{host}}/api/Customers/{{createCustomer.response.body.id}}/orders?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### Approve order
-POST {{host}}/api/Orders/{{createOrder.response.body.id}}/approval?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### Ship order
-POST {{host}}/api/Orders/{{createOrder.response.body.id}}/shipment?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### Deliver order
-POST {{host}}/api/Orders/{{createOrder.response.body.id}}/delivery?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### ===== CANCEL FLOW (separate order) =====
-
-### Create another order to test cancellation
-# @name cancelOrder
-POST {{host}}/api/Orders?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-
-{
-  "customerId": "{{createCustomer.response.body.id}}",
-  "lineItems": [
-    {
-      "productId": "{{createProduct.response.body.id}}",
-      "quantity": 5
-    }
-  ]
-}
-
-### Cancel draft order
-POST {{host}}/api/Orders/{{cancelOrder.response.body.id}}/cancellation?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### ===== AUTHORIZATION ERROR =====
-
-### Create customer with read-only actor (403 Forbidden)
-POST {{host}}/api/Customers?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{readOnlyActor}}
-
-{
-  "firstName": "Unauthorized",
-  "lastName": "User",
-  "email": "unauth@example.com",
-  "shippingAddress": {
-    "street": "123 No Access",
-    "city": "Denied",
-    "state": "WA",
-    "postalCode": "98000",
-    "country": "US"
-  }
-}
-
-### ===== OVERDUE ORDERS =====
-
-### List overdue orders
-GET {{host}}/api/Orders/overdue?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}

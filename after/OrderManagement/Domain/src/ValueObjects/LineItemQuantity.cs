@@ -1,23 +1,17 @@
-namespace OrderManagement.Domain.ValueObjects;
+﻿namespace OrderManagement.Domain;
 
-public partial class LineItemQuantity : ScalarValueObject<LineItemQuantity, int>, IScalarValue<LineItemQuantity, int>
+/// <summary>Line-item quantity. Integer in range [1, 999].</summary>
+public partial class LineItemQuantity : RequiredInt<LineItemQuantity>
 {
-    private LineItemQuantity(int value) : base(value) { }
+    /// <summary>Maximum quantity per line item.</summary>
+    public const int Max = 999;
 
-    public static Result<LineItemQuantity> TryCreate(int value, string? fieldName = null)
+    /// <summary>Minimum quantity per line item.</summary>
+    public const int Min = 1;
+
+    static partial void ValidateAdditional(int value, string fieldName, ref string? errorMessage)
     {
-        fieldName ??= "Quantity";
-
-        if (value < 1)
-        {
-            return Error.Validation($"{fieldName} must be at least 1.", fieldName);
-        }
-
-        if (value > 999)
-        {
-            return Error.Validation($"{fieldName} must be at most 999.", fieldName);
-        }
-
-        return new LineItemQuantity(value);
+        if (value < Min || value > Max)
+            errorMessage = $"Line-item quantity must be between {Min} and {Max}.";
     }
 }

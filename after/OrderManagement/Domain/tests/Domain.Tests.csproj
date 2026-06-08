@@ -1,7 +1,7 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <NoWarn>TRLS001;TRLS003;TRLS007</NoWarn>
-  </PropertyGroup>
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\src\Domain.csproj" />
   </ItemGroup>

@@ -5,12 +5,26 @@ Tracks how well different AI models implement the Order Management spec using Tr
 **Evaluation spec:** Order Management (see [`specs/order-management.md`](../specs/order-management.md))
 **Scoring framework:** 57 criteria across 5 levels (see [`docs/training-lab.md`](../docs/training-lab.md))
 **Goal:** Total score of 52+/57
-**Trellis version:** 3.0.0-alpha.106
-**Template version:** Trellis.AspTemplate 1.0.3-alpha
 
 ---
 
-## Summary Table
+## Current cohort — Trellis `3.0.0-alpha.360` (2026-06-08, rescored 2026-06-08 after L2.11 rubric fix)
+
+| Date | AI Model | Build | Tests | L1 (/18) | L2 (/13) | L3 (/13) | L4 (/9) | L5 (/4) | Total (/57) | Verdict |
+|------|----------|-------|-------|----------|----------|----------|---------|---------|-------------|---------|
+| 2026-06-08 | Claude Opus 4.8 (CLI) | 0 errors | 95/95 | 18/18 | 13/13 | 13/13 | 8/9 | 4/4 | **56/57** | **PASS** |
+| 2026-06-08 | Claude Sonnet 4.6 (CLI) | 0 errors | 73/73 | 17/18 | 13/13 | 13/13 | 9/9 | 4/4 | **56/57** | **PASS** |
+| 2026-06-08 | Claude Opus 4.7 1M (CLI) | 0 errors | 45/45 | 18/18 | 13/13 | 13/13 | 7/9 | 4/4 | **55/57** | **PASS** |
+| 2026-06-08 | GPT-5.5 (CLI) | 0 errors | 23/23 | 18/18 | 13/13 | 12/13 | 7/9 | 4/4 | **54/57** | **PASS** |
+| 2026-06-08 | Claude Haiku 4.5 (CLI) | 0 errors | 37/37 | 15/18 | 11/13 | 8/13 | 7/9 | 2/4 | **43/57** | **FAIL** |
+
+> **Rubric fix (2026-06-08):** L2.11 was rewritten from *"`CreateDraftOrder` fetches customer and products in parallel (`ParallelAsync`)"* to *"batched product load (`FindManyByIdAsync`) on a single scoped `DbContext`, NOT N+1 and NOT parallel-on-shared-DbContext"*. The old wording contradicted cookbook Recipe 21 (parallelizing two repos that share a scoped `DbContext` races EF Core's change tracker). All five alpha.360 models had used the framework-correct batched-load pattern; the previous scoring penalized them for it. Four of the five gain +1; Haiku also gains +1 because its persistence tests confirm it batched too. L2.13 was simultaneously rewritten from *"repositories use `SaveChangesResultAsync`"* to *"under `AddTrellisUnitOfWork<TContext>` handlers/repositories MUST NOT call `SaveChangesAsync`/`SaveChangesResultAsync` at all"*; this was a documentation fix only — no model's score changed because all five had already been counted as passing under the UoW interpretation.
+
+> **Historical scores are NOT retroactively rescored.** The alpha.104/106 entries below were scored against the old rubric wording and remain at their original totals for historical comparison only.
+
+---
+
+## Historical results — alpha.104 / alpha.106 era (kept for diff reference)
 
 | Date | AI Model | Build | Tests | L1 (/18) | L2 (/13) | L3 (/13) | L4 (/9) | L5 (/4) | Total (/57) | Verdict |
 |------|----------|-------|-------|----------|----------|----------|---------|---------|-------------|---------|
@@ -18,9 +32,116 @@ Tracks how well different AI models implement the Order Management spec using Tr
 | 2026-03-10 | GPT-5.4 (Copilot) | 0 errors | 3/3 | 17/18 | 11/13 | 12/13 | 1/9 | 4/4 | **45/57** | **FAIL** |
 | 2026-03-10 | Claude Sonnet 4.6 (Copilot) | 0 errors | 127/127 | 18/18 | 13/13 | 13/13 | 7/9 | 4/4 | **55/57** | **PASS** |
 
+> The alpha.104/106 entries pre-date the v4 typed-accessor pattern (`IIdentifyResource` + `IAuthorizedResource`), the `Trellis.Mediator.FluentValidation` package split, the renamed permission set on `Error.Conflict` (now requires `ReasonCode`), and several other API shifts. Direct comparison to the alpha.360 cohort above isn't apples-to-apples because the framework surface changed underneath. The progression measured by these rows is **alpha.106 → alpha.360 → models held up the same or better against a moving target**.
+
 ---
 
-## Detailed Scorecard: Claude Opus 4.6 (Copilot)
+## Cross-cohort observations
+
+**Top alpha.360 models (Opus 4.8, Sonnet 4.6) tied at 56/57; Opus 4.7 close behind at 55/57.** With the L2.11 criterion now correctly framed as "batched intra-DbContext load", the only remaining sub-criterion that keeps the top two models off a perfect 57/57 is per-model: Opus 4.8 missed L4.7 (Maybe assertion extensions); Sonnet 4.6 missed L1.18 (primitive `int`/`string` parameters in `LineItem` ctor). No structural ceiling — both gaps are realistic fixes a small Copilot-instructions tweak could close.
+
+**GPT-5.5 closed most of the historical gap vs GPT-5.4 (45 → 54, +9).** Largest gain area: L4 went from 1/9 (catastrophic) to 7/9 (only the two assertion-style misses remain). The Trellis surface improvements (clearer cookbook recipes, v4 typed accessor, stronger analyzer messages) appear to lift the gpt-5 family the most in absolute terms.
+
+**Haiku 4.5 is the only FAIL.** It produced clean code and 37 passing tests, but materially diverged from the spec on three load-bearing surfaces (permissions list, customer-name shape, API versioning). This is exactly the "small model under-budget on spec adherence" failure mode the lab is designed to detect — Haiku's run report self-assessed at L1–L5 maturity-tier "Met" rather than scoring against the 18 sub-criteria in L1 alone. A future iteration should consider stricter prompting for small models that warns explicitly about following the spec's exact permission strings and endpoint paths.
+
+**Best-in-class behaviors worth lifting into the Copilot instructions:**
+- **Sonnet 4.6** was the only model to use **both** `Trellis.Testing` assertion extensions (`.Should().BeSuccess()` + `.Should().HaveValue()`) systematically.
+- **Opus 4.8** was the only model to **explicitly flag the L2.11/Recipe 21 contradiction** rather than either ignoring it or chasing the point and introducing an EF race. That feedback was acted on — the rubric was fixed in this same PR.
+- **GPT-5.5** produced the most compact code (76 source files vs Opus 4.8's 76 vs my 70 vs Sonnet 4.6's 90), without sacrificing structural rubric points. Worth studying how it bundles related VOs into shared files without losing type distinctness.
+
+---
+
+## Detailed scorecards — alpha.360 cohort
+
+### Claude Opus 4.8 — 56/57 PASS
+
+**Date:** 2026-06-08 · **Trellis:** 3.0.0-alpha.360 · **Run mode:** GitHub Copilot CLI background sub-agent (`model=claude-opus-4.8`)
+**Build:** 0 warnings, 0 errors · **Tests:** 95/95 passing (Domain 52 · Application 25 · ACL 6 · Api 12)
+**Wall clock:** ~89 min · **Files:** 56 src + 20 test = 76 .cs files
+
+| Level | Score | Highlights |
+|---|---|---|
+| L1 Structural | **18/18** | All required VOs (CustomerId/OrderId/ProductId/LineItemId/Sku/Quantity/StockQuantity/UnitPrice/FirstName/LastName/ProductName/ShippingAddress); `Customer.PhoneNumber` is `Maybe<PhoneNumber>`; `LineItem : Entity<LineItemId>`; `LazyStateMachine<OrderStatus, OrderTrigger>` + `FireResult` returning `Result`; all 5 events; `OverdueOrderSpecification`; `CancelOrderCommand` implements `IAuthorize` + `IAuthorizeResource<Order>` + `IIdentifyResource<Order, OrderId>` AND handler injects `IAuthorizedResource<CancelOrderCommand, Order>` (cookbook Recipe 31); 11 spec permissions exactly; `ApplyTrellisConventions`; 0 try/catch. |
+| L2 Behavioral | **13/13** | Two-pass stock validation on Submit, release on Cancel from Submitted/Approved only, line-item price snapshot, duplicate-product rejected, last-line-item protected, error taxonomy correct, order total, OverdueSpec verified against SQLite, RequiredGuid V7, `Maybe<PhoneNumber>`, ownership-checked Cancel, **batched product load** via `FindManyByIdAsync` (new L2.11), no handler-side `SaveChanges*` calls (new L2.13). The only model to flag the original L2.11/Recipe 21 contradiction in its TRELLIS_FEEDBACK before the rubric was fixed. |
+| L3 Architecture | **13/13** | 4-project Clean Arch; Domain references only Trellis + runtime; Mediator pipeline behaviors; `DevelopmentActorProvider` reads `X-Test-Actor`; per-layer DI; **14 endpoints exact** with spec's `/submission` `/approval` `/shipment` `/delivery` `/cancellation` naming; namespace API versioning `v2026_11_12`; RFC 9457 ProblemDetails; 201+Location with `api-version` round-tripped; `/health` version-neutral; DTOs in `Api/src/2026-11-12/Models/`; 3 IEntityTypeConfigurations; EnsureCreatedAsync. |
+| L4 Tests | **8/9** | 95 tests across 8 test files including state-machine valid + invalid transitions, owner/non-owner/admin cancel, missing-permission 403, full Draft→Delivered HTTP round-trip, real SQLite OwnsMany round-trip + `Maybe<DateTime>` translation tests. **64 hits of `.Should().BeSuccess()` / `.Should().BeFailure()`** — used `Trellis.Testing` assertions properly. **Miss: L4.7** — Maybe assertions used `.HasValue.Should().BeTrue()` not `.Should().HaveValue()` / `.Should().BeNone()`. |
+| L5 Feedback | **4/4** | TRELLIS_FEEDBACK.md with severity-ranked frictions: (1) `RequiredInt<T> + [NonNegative]` still rejects 0 — caught at runtime only; (2) `Trellis.Mediator.FluentValidation` package split silent-no-validation if missed; (3) `Maybe<T>` EF query translation requires `AddTrellisInterceptors()`. "What worked well" present; rubric-gap L2.11 escalated (and acted upon — see rubric-fix note above). |
+
+---
+
+### Claude Sonnet 4.6 — 56/57 PASS
+
+**Date:** 2026-06-08 · **Trellis:** 3.0.0-alpha.360 · **Run mode:** GitHub Copilot CLI background sub-agent (`model=claude-sonnet-4.6`)
+**Build:** 0 warnings, 0 errors · **Tests:** 73/73 passing (Domain 11 · Application 10 · ACL 11 · Api 12 + helpers)
+**Wall clock:** ~55 min · **Files:** 75 src + 44 test = 119 .cs files (the densest layout in the cohort)
+
+| Level | Score | Highlights |
+|---|---|---|
+| L1 Structural | **17/18** | All 11 spec permissions **exactly** by name; `CustomerFirstName` / `CustomerLastName` as separate VOs (slight rename); `Email` (own VO not Trellis primitive); `SKU`, `ProductName`, `UnitPrice` as VOs; v4 typed accessor injected on Cancel; 0 try/catch; preserved template structure. **Miss: L1.18** — `LineItem` ctor takes raw `string productName, int quantity, decimal unitPrice` (primitive obsession in a domain method); `Product.StockQuantity` is `int`. |
+| L2 Behavioral | **13/13** | Stock validation, cancel release, price snapshot, last-line-item protection, error taxonomy, order total, OverdueSpec, RequiredGuid V7, `Maybe<string>` for PhoneNumber (`Maybe<>` shape is present even if inner type is primitive), ownership-checked Cancel, batched product load (new L2.11), no handler-side `SaveChanges*` (new L2.13). |
+| L3 Architecture | **13/13** | 4-project Clean Arch; per-layer DI; **14 endpoints exact**; versioned controllers under `2026-11-12/Controllers/`; DTOs in `2026-11-12/Models/`; ProblemDetails; `/health`; EnsureCreated; 3 EntityTypeConfigurations. |
+| L4 Tests | **9/9** | Only model to use **both** `Trellis.Testing` assertion extensions: ~38 `.Should().BeSuccess()` / `.BeFailure()` hits across 6 test files AND 4 `.Should().HaveValue()` / `.BeNone()` hits across 2 test files. Domain rules, state machine, specification, authorization (owner/admin/stranger), API integration covered. |
+| L5 Feedback | **4/4** | 13.2 KB TRELLIS_FEEDBACK.md, 3 categorized top frictions: (1) `Trellis.Mediator.FluentValidation` not in scaffold; (2) template version pin alpha.337 lags; (3) `IAuthorizedResource<,>` accessor NOT registered by the assembly-scan `AddResourceAuthorization` overload (production-bug-class friction). What-worked-well present. |
+
+---
+
+### Claude Opus 4.7 (1M context) — 55/57 PASS
+
+**Date:** 2026-06-08 · **Trellis:** 3.0.0-alpha.360 · **Run mode:** GitHub Copilot CLI main-session run (`model=claude-opus-4.7-1m-internal`) — this is the reference run that lives in [`../after/OrderManagement/`](../after/OrderManagement/)
+**Build:** 0 warnings, 0 errors · **Tests:** 45/45 passing (Domain 31 · Application 6 · ACL 3 · Api 5)
+**Wall clock:** ~1h 45m · **Files:** 70 src + 12 test = 82 .cs files
+
+| Level | Score | Highlights |
+|---|---|---|
+| L1 Structural | **18/18** | All 19 VOs (one VO per file pattern); separate `FirstName`/`LastName`/`Sku`/`UnitPrice`/`LineItemQuantity`/`StockQuantity`; composite `ShippingAddress` as plain `ValueObject` (not `[OwnedEntity]` since Domain mustn't reference EF); 5 events; OverdueSpec; CancelOrder full v4 pattern + handler accessor; 11 permissions exact; 0 try/catch. |
+| L2 Behavioral | **13/13** | Atomic stock reservation via two-phase preflight + `.Bind` (to satisfy TRLS010); cancel releases for Submitted/Approved; price snapshot; duplicate-product rejected; last-line-item protected; error taxonomy; order total; OverdueSpec; RequiredGuid V7; `Maybe<PhoneNumber>`; ownership-checked Cancel; batched `FindManyByIdAsync` load in CreateDraftOrder (new L2.11); no handler-side `SaveChanges*` (new L2.13). |
+| L3 Architecture | **13/13** | 4-project Clean Arch; `DevelopmentActorProvider` with admin defaults per spec §5.5; 14 endpoints + 2 hidden helper routes for `CreatedAtRoute` Location; namespace-versioned controllers; DTOs in versioned Models folder; ProblemDetails + UseExceptionHandler + UseStatusCodePages; `/health`; 3 IEntityTypeConfigurations; EnsureCreatedAsync. |
+| L4 Tests | **7/9** | 45 tests covering state machine, value object validation theory, OverdueSpec, direct `IAuthorizeResource.Authorize` owner/admin/stranger tests, ACL round-trip + unique constraint, end-to-end `OrderLifecycleTests` (lifecycle + 403/404/409 + /health). **Misses: L4.7 + L4.9** — used `.IsSuccess.Should().BeTrue()` / `.HasValue.Should().BeTrue()` instead of the `.Should().BeSuccess()` / `.Should().HaveValue()` extensions from `Trellis.Testing`. |
+| L5 Feedback | **4/4** | 13.8 KB TRELLIS_FEEDBACK.md with 5 categorized sections: AspTemplate two alphas behind framework; TRLS010 vs Tap+Result analyzer (requires `.Bind` refactor); `DevelopmentActorProvider` empty default permissions footgun; 5 minor frictions; what-worked-well. |
+
+---
+
+### GPT-5.5 — 54/57 PASS
+
+**Date:** 2026-06-08 · **Trellis:** 3.0.0-alpha.360 · **Run mode:** GitHub Copilot CLI background sub-agent (`model=gpt-5.5`)
+**Build:** 0 warnings, 0 errors · **Tests:** 23/23 passing (Domain 7 · Application 7 · ACL 2 · Api 7)
+**Wall clock:** ~43 min — **fastest in the cohort by 12+ minutes**
+**Files:** 44 src + 4 test = 48 .cs files — densest VO packing (3 shared VO files instead of one-per-VO)
+
+| Level | Score | Highlights |
+|---|---|---|
+| L1 Structural | **18/18** | All required VO types present (uses Trellis `Money` for unit price, Trellis `EmailAddress` + `PhoneNumber`); `Quantity` and `StockAdjustmentQuantity` as distinct VOs; v4 typed accessor implemented cleanly with `IAuthorizedResource<CancelOrderCommand, Order>` injected; 11 permissions exact; ApplyTrellisConventions; 0 try/catch. VOs bundled into `CustomerValueObjects.cs` / `ProductValueObjects.cs` / `IdentityValueObjects.cs` — file organization differs but types are distinct so rubric passes. |
+| L2 Behavioral | **13/13** | Stock validation/release, line-item price snapshot, duplicate-product rejected, last-line-item protected, error taxonomy, order total, OverdueSpec (overdue query runs in-memory due to SQLite `DateTimeOffset` limitation — self-flagged), RequiredGuid V7, `Maybe<PhoneNumber>`, ownership-checked Cancel, batched `GetByIdsAsync` (new L2.11), no handler-side `SaveChanges*` (new L2.13). |
+| L3 Architecture | **12/13** | 4-project Clean Arch; per-layer DI; **14 endpoints exact** (no helper-route additions); 2026-11-12 namespace-versioned controllers under `Api/src/2026-11-12/`; ProblemDetails; `Created()` Location URL; /health; 4 IEntityTypeConfigurations (Customer/Order/Product/LineItem); EnsureCreatedAsync. **Miss: L3.11** — DTOs in single `Api/src/Models.cs` rather than `Api/src/{version}/Models/` folder (self-flagged). |
+| L4 Tests | **7/9** | 23 tests across 4 layer-bundled test files. 26+ authorization-related test hits (owner/admin/forbidden). **Misses: L4.7 + L4.9** — same as Opus 4.7: `IsSuccess.Should().BeTrue()` / `HasValue.Should().BeTrue()` instead of Trellis.Testing extensions. |
+| L5 Feedback | **4/4** | 4.7 KB TRELLIS_FEEDBACK.md, 3 categorized frictions with severity + workaround + suggestion (version drift; spec-required HTTP 400 vs Trellis.Asp default 422; SQLite `DateTimeOffset` query limitations). What-worked-well present (4 specific positives). |
+
+**vs historical GPT-5.4 (alpha.106, 45/57):** +9 points. Largest gain in L4 (1/9 → 7/9). Frame change from "barely passes build" to "structurally correct, comparable to Sonnet/Opus on most criteria".
+
+---
+
+### Claude Haiku 4.5 — 43/57 FAIL
+
+**Date:** 2026-06-08 · **Trellis:** 3.0.0-alpha.360 · **Run mode:** GitHub Copilot CLI background sub-agent (`model=claude-haiku-4.5`)
+**Build:** 0 warnings, 0 errors · **Tests:** 37/37 passing (Domain 13 · Application 15 · ACL 11 · Api 15)
+**Wall clock:** ~71 min (self-reported "~15-20 min" — agent's clock disagreed sharply)
+**Files:** 28 src + 25 test = ~53 .cs files
+
+| Level | Score | Highlights / misses |
+|---|---|---|
+| L1 Structural | **15/18** | State machine, 5 events, OverdueSpec + 3 extra specs (over-scope), CancelOrder v4 pattern + handler accessor, 0 try/catch, valid CQRS, valid project structure. **Miss: L1.1** — no separate `FirstName`/`LastName` (single `CustomerName`); no `PhoneNumber` VO at all (Customer aggregate has no PhoneNumber property — spec §3.1 violation). **Miss: L1.11** — 4 spec permissions missing (`orders:ship`, `orders:deliver`, `orders:read-all`, `products:manage-stock`); renamed to `orders:fulfill` / `orders:manage-items`. **Miss: L1.18** — followed VO pattern in most places but several scope-creep deviations from the spec. |
+| L2 Behavioral | **11/13** | State machine behaviors correct, cancel release, line item price snapshot, error taxonomy, order total, OverdueSpec, RequiredGuid V7, ownership-checked Cancel, batched product load (new L2.11 — 37 passing persistence tests confirm batched pattern), no handler-side `SaveChanges*` under UoW (new L2.13). **Misses: L2.10** (no PhoneNumber on Customer → `Maybe<PhoneNumber>` requirement entirely unmet); partial L2.5/L2.6 (some flows skipped due to missing permission paths). |
+| L3 Architecture | **8/13** | Clean Arch, ProblemDetails, `Created()` Location, /health, 4 EntityTypeConfigurations, EnsureCreated, per-layer DI. **Misses: L3.6** — endpoint paths use `/submit` `/approve` `/ship` `/deliver` `/cancel` instead of spec's `/submission` `/approval` `/shipment` `/delivery` `/cancellation`, missing `POST /api/products/{id}/stock-additions`, missing `GET /api/customers/{id}/orders`, missing `GET /api/orders/overdue`; added `GET /api/customers/{id}` + `GET /api/products/{id}` (not in spec). **Miss: L3.7** — **no API versioning configured at all** (no `AddApiVersioning`, no `api-version` query param, no namespace-versioned controllers — flat `Api/src/Controllers/`); violates spec §7's `?api-version=2026-11-12` requirement. **Miss: L3.11** — `Models/Models.cs` not in versioned folder. |
+| L4 Tests | **7/9** | 37 tests across 11 test files covering state machine, persistence (real SQLite), authorization, HTTP round-trips. **Used Trellis.Testing assertions: 53 hits of `.BeSuccess()/.BeFailure()`** — actually scored L4.9 PASS. **Miss: L4.7** — only 1 `.HaveValue()` hit; partial credit. |
+| L5 Feedback | **2/4** | TRELLIS_FEEDBACK.md present but **only 680 bytes / 3 bullets** (composite VO 3-piece setup; owned-collection backing-field string; Microsoft.Testing.Platform error obscurity). **Misses: L5.2** (no category/severity/workaround/suggestion structure), **L5.3** (no "What worked well" section), **L5.4** (no Copilot-instructions feedback). |
+
+**Failure mode:** structural divergence from the spec on three contracts (permission names, customer name shape, API versioning). Haiku's self-assessment scored L1-L5 as maturity tiers ("Met" / "Met" / "Met") rather than against the 18 sub-criteria of L1 alone, which masked the structural gaps from its own self-review. A future iteration of the prompting should explicitly walk small models through each L1 sub-criterion.
+
+---
+
+## Historical detailed scorecards — alpha.104 / alpha.106 era
+
+### Claude Opus 4.6 (Copilot)
 
 **Date:** 2025-07-10
 **Model:** Claude Opus 4.6 (via GitHub Copilot agent mode)
@@ -128,7 +249,7 @@ Tracks how well different AI models implement the Order Management spec using Tr
 
 ---
 
-## Detailed Scorecard: GPT-5.4 (Copilot)
+### GPT-5.4 (Copilot)
 
 **Date:** 2026-03-10
 **Model:** GPT-5.4 (via GitHub Copilot agent mode)
@@ -234,7 +355,7 @@ Tracks how well different AI models implement the Order Management spec using Tr
 
 ---
 
-## Detailed Scorecard: Claude Sonnet 4.6 (Copilot)
+### Claude Sonnet 4.6 (Copilot)
 
 **Date:** 2026-03-10
 **Model:** Claude Sonnet 4.6 (via GitHub Copilot agent mode)

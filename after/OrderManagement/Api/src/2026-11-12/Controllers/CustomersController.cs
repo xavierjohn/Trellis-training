@@ -5,63 +5,71 @@ using Microsoft.AspNetCore.Mvc;
 using OrderManagement.Api.v2026_11_12.Models;
 using OrderManagement.Application.Customers;
 using OrderManagement.Application.Orders;
-using OrderManagement.Domain.ValueObjects;
+using OrderManagement.Domain;
 using Trellis.Asp;
-using Trellis.Primitives;
+using Trellis.Asp.ApiVersioning;
 
+/// <summary>Customers controller (spec §6.1, §6.13, §7).</summary>
 [ApiController]
-[Consumes("application/json")]
 [Produces("application/json")]
 [Route("api/[controller]")]
-public class CustomersController(ISender sender) : ControllerBase
+public class CustomersController : ControllerBase
 {
+    private readonly ISender _sender;
+
+    public CustomersController(ISender sender) => _sender = sender;
+
+    /// <summary>Create a new customer. <c>POST /api/customers</c>.</summary>
     [HttpPost]
-    public async Task<ActionResult<CustomerResponse>> Create(
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ValueTask<ActionResult<CustomerResponse>> Create(
         [FromBody] CreateCustomerRequest request,
-        CancellationToken ct)
-    {
-        var phoneNumber = request.PhoneNumber is not null
-            ? Maybe.From(request.PhoneNumber)
-            : Maybe.None<PhoneNumber>();
+        CancellationToken cancellationToken) =>
+        _sender.Send(
+                new CreateCustomerCommand(
+                    request.FirstName,
+                    request.LastName,
+                    request.Email,
+                    request.PhoneNumber,
+                    request.ShippingAddress.ToDomain()),
+                cancellationToken)
+            .ToHttpResponseAsync(
+                CustomerResponse.From,
+                opts => opts
+                    .CreatedAtRoute("Customers_GetById", c => new Microsoft.AspNetCore.Routing.RouteValueDictionary
+                    {
+                        ["id"] = c.Id.Value,
+                    })
+                    .WithVersionedRoute())
+            .AsActionResultAsync<CustomerResponse>();
 
-        return await ShippingAddress.TryCreate(
-                request.ShippingAddress.Street,
-                request.ShippingAddress.City,
-                request.ShippingAddress.State,
-                request.ShippingAddress.PostalCode,
-                request.ShippingAddress.Country)
-            .Map(address => new CreateCustomerCommand(
-                request.FirstName,
-                request.LastName,
-                request.Email,
-                phoneNumber,
-                address))
-            .BindAsync(command => sender.Send(command, ct))
-            .MapAsync(CustomerResponse.From)
-            .ToCreatedAtActionResultAsync(this, nameof(Get), dto => new { id = dto.Id });
-    }
+    /// <summary>
+    /// Placeholder named GET (off swagger) so <see cref="Create"/>'s
+    /// <c>CreatedAtRoute</c> can resolve a <c>Customers_GetById</c> route for the
+    /// Location header. Spec §7 doesn't expose a "get customer by id" endpoint —
+    /// this is private routing infrastructure, not API surface.
+    /// </summary>
+    [HttpGet("{id}", Name = "Customers_GetById")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public IActionResult GetById(Guid id) => NotFound();
 
-    [HttpGet("{id}")]
-    public async Task<ActionResult<CustomerResponse>> Get(
-        CustomerId id,
-        CancellationToken ct)
-    {
-        var query = new GetCustomerByIdQuery(id);
-
-        return await sender.Send(query, ct)
-            .MapAsync(CustomerResponse.From)
-            .ToActionResultAsync(this);
-    }
-
+    /// <summary>
+    /// List every order belonging to a customer. <c>GET /api/customers/{id}/orders</c>
+    /// (spec §6.13). Requires <see cref="Permissions.OrdersReadAll"/>.
+    /// </summary>
     [HttpGet("{id}/orders")]
-    public async Task<ActionResult<List<OrderResponse>>> ListOrders(
+    [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<IReadOnlyList<OrderResponse>>> ListOrders(
         CustomerId id,
-        CancellationToken ct)
-    {
-        var query = new ListOrdersByCustomerQuery(id);
-
-        return await sender.Send(query, ct)
-            .MapAsync(orders => orders.Select(OrderResponse.From).ToList())
-            .ToActionResultAsync(this);
-    }
+        CancellationToken cancellationToken) =>
+        _sender.Send(new ListOrdersByCustomerQuery(id), cancellationToken)
+            .ToHttpResponseAsync(orders =>
+                (IReadOnlyList<OrderResponse>)orders.Select(OrderResponse.From).ToList())
+            .AsActionResultAsync<IReadOnlyList<OrderResponse>>();
 }

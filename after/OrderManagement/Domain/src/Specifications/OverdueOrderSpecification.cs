@@ -1,24 +1,28 @@
-namespace OrderManagement.Domain.Specifications;
+﻿namespace OrderManagement.Domain;
 
-using System.Linq.Expressions;
-using OrderManagement.Domain.Aggregates;
-using OrderManagement.Domain.ValueObjects;
-
-public class OverdueOrderSpecification : Specification<Order>
+/// <summary>
+/// An order is overdue when it has been in <see cref="OrderStatus.Submitted"/> status for
+/// more than 7 days without being Approved. Used by the
+/// <c>ListOverdueOrdersQuery</c> read path.
+/// </summary>
+public sealed class OverdueOrderSpecification : Specification<Order>
 {
-    private readonly DateTime _cutoffDate;
+    /// <summary>Threshold in days after which a Submitted order is overdue.</summary>
+    public const int OverdueThresholdDays = 7;
 
-    public OverdueOrderSpecification(DateTime utcNow)
+    private readonly DateTimeOffset _asOfUtc;
+
+    public OverdueOrderSpecification(DateTimeOffset asOfUtc)
     {
-        _cutoffDate = utcNow.AddDays(-7);
+        _asOfUtc = asOfUtc;
     }
 
-    public override Expression<Func<Order, bool>> ToExpression()
+    public override System.Linq.Expressions.Expression<Func<Order, bool>> ToExpression()
     {
-        // Note: This specification is used for in-memory evaluation via IsSatisfiedBy.
-        // For EF Core queries, the repository uses direct LINQ with the backing field.
-        return order => order.Status == OrderStatus.Submitted
+        var cutoff = _asOfUtc.AddDays(-OverdueThresholdDays);
+        return order =>
+            order.Status == OrderStatus.Submitted
             && order.SubmittedAt.HasValue
-            && order.SubmittedAt.GetValueOrDefault(DateTime.MaxValue) <= _cutoffDate;
+            && order.SubmittedAt.Value < cutoff;
     }
 }

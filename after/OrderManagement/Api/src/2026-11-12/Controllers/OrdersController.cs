@@ -4,152 +4,171 @@ using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using OrderManagement.Api.v2026_11_12.Models;
 using OrderManagement.Application.Orders;
-using OrderManagement.Domain.ValueObjects;
+using OrderManagement.Domain;
 using Trellis.Asp;
+using Trellis.Asp.ApiVersioning;
 
+/// <summary>Orders controller (spec §6.4–§6.12, §6.14, §7).</summary>
 [ApiController]
-[Consumes("application/json")]
 [Produces("application/json")]
 [Route("api/[controller]")]
-public class OrdersController(ISender sender) : ControllerBase
+public class OrdersController : ControllerBase
 {
+    private readonly ISender _sender;
+
+    public OrdersController(ISender sender) => _sender = sender;
+
+    /// <summary>Create a draft order. <c>POST /api/orders</c>.</summary>
     [HttpPost]
-    public async Task<ActionResult<OrderResponse>> Create(
-        [FromBody] CreateDraftOrderRequest request,
-        CancellationToken ct)
-    {
-        var lineItemInputs = new List<LineItemInput>();
-        foreach (var item in request.LineItems)
-        {
-            var quantityResult = LineItemQuantity.TryCreate(item.Quantity);
-            if (quantityResult.TryGetError(out var error))
-            {
-                return error.ToActionResult<OrderResponse>(this);
-            }
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<OrderResponse>> Create(
+        [FromBody] CreateOrderRequest request,
+        CancellationToken cancellationToken) =>
+        _sender.Send(
+                new CreateDraftOrderCommand(
+                    request.CustomerId,
+                    request.LineItems.Select(li => li.ToDomain()).ToList()),
+                cancellationToken)
+            .ToHttpResponseAsync(
+                OrderResponse.From,
+                opts => opts
+                    .CreatedAtRoute("Orders_GetById", o => new Microsoft.AspNetCore.Routing.RouteValueDictionary
+                    {
+                        ["id"] = o.Id.Value,
+                    })
+                    .WithVersionedRoute())
+            .AsActionResultAsync<OrderResponse>();
 
-            quantityResult.TryGetValue(out var quantity);
-            lineItemInputs.Add(new LineItemInput(item.ProductId, quantity));
-        }
+    /// <summary>Get an order by id. <c>GET /api/orders/{id}</c>.</summary>
+    [HttpGet("{id}", Name = "Orders_GetById")]
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<OrderResponse>> GetById(
+        OrderId id,
+        CancellationToken cancellationToken) =>
+        _sender.Send(new GetOrderByIdQuery(id), cancellationToken)
+            .ToHttpResponseAsync(OrderResponse.From)
+            .AsActionResultAsync<OrderResponse>();
 
-        var command = new CreateDraftOrderCommand(request.CustomerId, lineItemInputs);
+    /// <summary>List overdue orders. <c>GET /api/orders/overdue</c>.</summary>
+    [HttpGet("overdue")]
+    [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public ValueTask<ActionResult<IReadOnlyList<OrderResponse>>> GetOverdue(
+        CancellationToken cancellationToken) =>
+        _sender.Send(new ListOverdueOrdersQuery(), cancellationToken)
+            .ToHttpResponseAsync(orders =>
+                (IReadOnlyList<OrderResponse>)orders.Select(OrderResponse.From).ToList())
+            .AsActionResultAsync<IReadOnlyList<OrderResponse>>();
 
-        return await sender.Send(command, ct)
-            .MapAsync(OrderResponse.From)
-            .ToCreatedAtActionResultAsync(this, nameof(GetById), dto => new { id = dto.Id });
-    }
-
+    /// <summary>Add a line item to a draft order. <c>POST /api/orders/{id}/line-items</c>.</summary>
     [HttpPost("{id}/line-items")]
-    public async Task<ActionResult<OrderResponse>> AddLineItem(
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<OrderResponse>> AddLineItem(
         OrderId id,
         [FromBody] AddLineItemRequest request,
-        CancellationToken ct)
-    {
-        var quantityResult = LineItemQuantity.TryCreate(request.Quantity);
-        if (quantityResult.TryGetError(out var error))
-        {
-            return error.ToActionResult<OrderResponse>(this);
-        }
+        CancellationToken cancellationToken) =>
+        _sender.Send(new AddLineItemCommand(id, request.ProductId, request.Quantity), cancellationToken)
+            .ToHttpResponseAsync(OrderResponse.From)
+            .AsActionResultAsync<OrderResponse>();
 
-        quantityResult.TryGetValue(out var quantity);
-        var command = new AddLineItemCommand(id, request.ProductId, quantity);
-
-        return await sender.Send(command, ct)
-            .MapAsync(OrderResponse.From)
-            .ToActionResultAsync(this);
-    }
-
+    /// <summary>
+    /// Remove a line item from a draft order.
+    /// <c>DELETE /api/orders/{id}/line-items/{lineItemId}</c>.
+    /// </summary>
     [HttpDelete("{id}/line-items/{lineItemId}")]
-    public async Task<ActionResult<OrderResponse>> RemoveLineItem(
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<OrderResponse>> RemoveLineItem(
         OrderId id,
         LineItemId lineItemId,
-        CancellationToken ct)
-    {
-        var command = new RemoveLineItemCommand(id, lineItemId);
+        CancellationToken cancellationToken) =>
+        _sender.Send(new RemoveLineItemCommand(id, lineItemId), cancellationToken)
+            .ToHttpResponseAsync(OrderResponse.From)
+            .AsActionResultAsync<OrderResponse>();
 
-        return await sender.Send(command, ct)
-            .MapAsync(OrderResponse.From)
-            .ToActionResultAsync(this);
-    }
-
+    /// <summary>Submit an order. <c>POST /api/orders/{id}/submission</c>.</summary>
     [HttpPost("{id}/submission")]
-    public async Task<ActionResult<OrderResponse>> Submit(
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<OrderResponse>> Submit(
         OrderId id,
-        CancellationToken ct)
-    {
-        var command = new SubmitOrderCommand(id);
+        CancellationToken cancellationToken) =>
+        _sender.Send(new SubmitOrderCommand(id), cancellationToken)
+            .ToHttpResponseAsync(OrderResponse.From)
+            .AsActionResultAsync<OrderResponse>();
 
-        return await sender.Send(command, ct)
-            .MapAsync(OrderResponse.From)
-            .ToActionResultAsync(this);
-    }
-
+    /// <summary>Approve an order. <c>POST /api/orders/{id}/approval</c>.</summary>
     [HttpPost("{id}/approval")]
-    public async Task<ActionResult<OrderResponse>> Approve(
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<OrderResponse>> Approve(
         OrderId id,
-        CancellationToken ct)
-    {
-        var command = new ApproveOrderCommand(id);
+        CancellationToken cancellationToken) =>
+        _sender.Send(new ApproveOrderCommand(id), cancellationToken)
+            .ToHttpResponseAsync(OrderResponse.From)
+            .AsActionResultAsync<OrderResponse>();
 
-        return await sender.Send(command, ct)
-            .MapAsync(OrderResponse.From)
-            .ToActionResultAsync(this);
-    }
-
+    /// <summary>Ship an order. <c>POST /api/orders/{id}/shipment</c>.</summary>
     [HttpPost("{id}/shipment")]
-    public async Task<ActionResult<OrderResponse>> Ship(
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<OrderResponse>> Ship(
         OrderId id,
-        CancellationToken ct)
-    {
-        var command = new ShipOrderCommand(id);
+        CancellationToken cancellationToken) =>
+        _sender.Send(new ShipOrderCommand(id), cancellationToken)
+            .ToHttpResponseAsync(OrderResponse.From)
+            .AsActionResultAsync<OrderResponse>();
 
-        return await sender.Send(command, ct)
-            .MapAsync(OrderResponse.From)
-            .ToActionResultAsync(this);
-    }
-
+    /// <summary>Mark an order as delivered. <c>POST /api/orders/{id}/delivery</c>.</summary>
     [HttpPost("{id}/delivery")]
-    public async Task<ActionResult<OrderResponse>> Deliver(
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<OrderResponse>> Deliver(
         OrderId id,
-        CancellationToken ct)
-    {
-        var command = new DeliverOrderCommand(id);
+        CancellationToken cancellationToken) =>
+        _sender.Send(new DeliverOrderCommand(id), cancellationToken)
+            .ToHttpResponseAsync(OrderResponse.From)
+            .AsActionResultAsync<OrderResponse>();
 
-        return await sender.Send(command, ct)
-            .MapAsync(OrderResponse.From)
-            .ToActionResultAsync(this);
-    }
-
+    /// <summary>
+    /// Cancel an order. <c>POST /api/orders/{id}/cancellation</c>.
+    /// <para>
+    /// Requires <c>orders:cancel</c> AND ownership (or <c>orders:read-all</c>).
+    /// The resource-authorization pipeline loads the <see cref="Order"/> once via
+    /// <c>SharedResourceLoaderById&lt;Order, OrderId&gt;</c>; the handler re-uses
+    /// the loaded instance via the v4 typed
+    /// <c>IAuthorizedResource&lt;CancelOrderCommand, Order&gt;</c> accessor.
+    /// </para>
+    /// </summary>
     [HttpPost("{id}/cancellation")]
-    public async Task<ActionResult<OrderResponse>> Cancel(
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ValueTask<ActionResult<OrderResponse>> Cancel(
         OrderId id,
-        CancellationToken ct)
-    {
-        var command = new CancelOrderCommand(id);
-
-        return await sender.Send(command, ct)
-            .MapAsync(OrderResponse.From)
-            .ToActionResultAsync(this);
-    }
-
-    [HttpGet("{id}")]
-    public async Task<ActionResult<OrderResponse>> GetById(
-        OrderId id,
-        CancellationToken ct)
-    {
-        var query = new GetOrderByIdQuery(id);
-
-        return await sender.Send(query, ct)
-            .MapAsync(OrderResponse.From)
-            .ToActionResultAsync(this);
-    }
-
-    [HttpGet("overdue")]
-    public async Task<ActionResult<List<OrderResponse>>> GetOverdue(CancellationToken ct)
-    {
-        var query = new ListOverdueOrdersQuery();
-
-        return await sender.Send(query, ct)
-            .MapAsync(orders => orders.Select(OrderResponse.From).ToList())
-            .ToActionResultAsync(this);
-    }
+        CancellationToken cancellationToken) =>
+        _sender.Send(new CancelOrderCommand(id), cancellationToken)
+            .ToHttpResponseAsync(OrderResponse.From)
+            .AsActionResultAsync<OrderResponse>();
 }

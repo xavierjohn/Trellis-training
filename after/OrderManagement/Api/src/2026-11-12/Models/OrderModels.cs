@@ -1,64 +1,75 @@
 namespace OrderManagement.Api.v2026_11_12.Models;
 
-using OrderManagement.Domain.Aggregates;
-using OrderManagement.Domain.ValueObjects;
+using OrderManagement.Application.Orders;
+using OrderManagement.Domain;
 
-public record OrderResponse(
-    Guid Id,
-    Guid CustomerId,
-    string CreatedByActorId,
-    string Status,
-    List<LineItemResponse> LineItems,
-    decimal OrderTotal,
-    string OrderTotalCurrency,
-    DateTime CreatedAt,
-    DateTime? SubmittedAt,
-    DateTime? ShippedAt)
+/// <summary>Line-item response nested inside an order response.</summary>
+public record LineItemResponse
 {
-    public static OrderResponse From(Order order) => new(
-        order.Id.Value,
-        order.CustomerId.Value,
-        order.CreatedByActorId.Value,
-        order.Status.Name,
-        order.LineItems.Select(LineItemResponse.From).ToList(),
-        order.CalculateTotal().Amount,
-        order.CalculateTotal().Currency.Value,
-        order.CreatedAt,
-        order.SubmittedAt.Match(v => (DateTime?)v, () => null),
-        order.ShippedAt.Match(v => (DateTime?)v, () => null));
+    public Guid Id { get; init; }
+    public Guid ProductId { get; init; }
+    public string ProductName { get; init; } = null!;
+    public int Quantity { get; init; }
+    public decimal UnitPrice { get; init; }
+    public decimal LineTotal { get; init; }
+
+    public static LineItemResponse From(LineItem li) => new()
+    {
+        Id = li.Id.Value,
+        ProductId = li.ProductId.Value,
+        ProductName = li.ProductName.Value,
+        Quantity = li.Quantity.Value,
+        UnitPrice = li.UnitPrice.Value,
+        LineTotal = li.LineTotal,
+    };
 }
 
-public record LineItemResponse(
-    Guid Id,
-    Guid ProductId,
-    string ProductName,
-    int Quantity,
-    decimal UnitPrice,
-    string UnitPriceCurrency)
+/// <summary>Order response model.</summary>
+public record OrderResponse
 {
-    public static LineItemResponse From(LineItem lineItem) => new(
-        lineItem.Id.Value,
-        lineItem.ProductId.Value,
-        lineItem.ProductName.Value,
-        lineItem.Quantity.Value,
-        lineItem.UnitPrice.Amount,
-        lineItem.UnitPrice.Currency.Value);
+    public Guid Id { get; init; }
+    public Guid CustomerId { get; init; }
+    public string CreatedByActorId { get; init; } = null!;
+    public string Status { get; init; } = null!;
+    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset? SubmittedAt { get; init; }
+    public DateTimeOffset? ShippedAt { get; init; }
+    public IReadOnlyList<LineItemResponse> LineItems { get; init; } = [];
+    public decimal OrderTotal { get; init; }
+
+    public static OrderResponse From(Order order) => new()
+    {
+        Id = order.Id.Value,
+        CustomerId = order.CustomerId.Value,
+        CreatedByActorId = order.CreatedByActorId.Value,
+        Status = order.Status.Value,
+        CreatedAt = order.CreatedAt,
+        SubmittedAt = order.SubmittedAt.Match<DateTimeOffset?>(t => t, () => null),
+        ShippedAt = order.ShippedAt.Match<DateTimeOffset?>(t => t, () => null),
+        LineItems = order.LineItems.Select(LineItemResponse.From).ToList(),
+        OrderTotal = order.OrderTotal,
+    };
 }
 
-public record CreateDraftOrderRequest
-{
-    public CustomerId CustomerId { get; init; } = null!;
-    public List<LineItemInputRequest> LineItems { get; init; } = [];
-}
-
-public record LineItemInputRequest
+/// <summary>Line-item shape inside <see cref="CreateOrderRequest"/>.</summary>
+public record CreateOrderLineRequest
 {
     public ProductId ProductId { get; init; } = null!;
-    public int Quantity { get; init; }
+    public LineItemQuantity Quantity { get; init; } = null!;
+
+    public DraftLineItem ToDomain() => new(ProductId, Quantity);
 }
 
+/// <summary>Request model for creating a draft order.</summary>
+public record CreateOrderRequest
+{
+    public CustomerId CustomerId { get; init; } = null!;
+    public IReadOnlyList<CreateOrderLineRequest> LineItems { get; init; } = [];
+}
+
+/// <summary>Request model for adding a line item to a draft order.</summary>
 public record AddLineItemRequest
 {
     public ProductId ProductId { get; init; } = null!;
-    public int Quantity { get; init; }
+    public LineItemQuantity Quantity { get; init; } = null!;
 }

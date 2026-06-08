@@ -1,9 +1,7 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <NoWarn>TRLS001;TRLS003;TRLS007</NoWarn>
-  </PropertyGroup>
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="Trellis.Authorization" />
     <PackageReference Include="Xunit.DependencyInjection" />
   </ItemGroup>
   <ItemGroup>

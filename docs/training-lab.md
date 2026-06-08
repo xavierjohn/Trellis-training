@@ -363,9 +363,9 @@ These should be highly consistent. Minor naming variations acceptable; logic mus
 | **Overdue spec correct** | Spec checks Submitted status + 7-day threshold, translatable to SQL | 10 = all correct, <7 = spec clarity |
 | **IDs use RequiredGuid with V7** | All identity types use RequiredGuid with Guid.CreateVersion7() | 10 = all correct, <7 = needs guidance |
 | **Maybe for optional phone** | Customer.PhoneNumber is Maybe\<PhoneNumber\>, stored as nullable column | 10 = all correct, <7 = needs pattern |
-| **ParallelAsync for draft order** | CreateDraftOrder fetches customer and products in parallel | 10 = all use ParallelAsync, <7 = needs example |
+| **Batched product load on draft order** | `CreateDraftOrder` fetches the product set in **one batched call** (e.g. `IProductRepository.FindManyByIdAsync`), not N sequential per-product fetches. Customer + product loads remain sequential on a single scoped `DbContext` (cookbook Recipe 21 forbids parallelizing two repos sharing one EF Core context — it races the change tracker). | 10 = single batched load, <7 = N+1 per-product fetches |
 | **Cancel resource auth check** | CancelOrderCommand checks actor == owner OR admin | 10 = all correct, <7 = needs pattern |
-| **SaveChangesResultAsync used** | Repositories use SaveChangesResultAsync, not bare SaveChangesAsync | 10 = all correct, <7 = needs guidance |
+| **Unit-of-work commits, handlers don't SaveChanges** | Under `AddTrellisUnitOfWork<TContext>` the pipeline commits exactly once at the end of the handler. Repositories stage changes (`Add`/`Remove`/mutate); they MUST NOT call `SaveChangesAsync` or `SaveChangesResultAsync` themselves. | 10 = zero `SaveChanges*` calls in handlers/repositories; <7 = one or more rogue commits |
 
 ### Level 3: Architecture & API Consistency (Scored)
 
