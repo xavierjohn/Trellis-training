@@ -166,8 +166,9 @@ Then verify:
 
 - [ ] `GET http://localhost:<port>/health` returns 200 with the §8 shape. `lastTickCounts` matches the expected counts from Step 5's seed table (`due=4, dispatched=2, softFailed=1, hardFailed=1`).
 - [ ] **Counter invariant:** `dispatched + softFailed + hardFailed + skippedDuplicate + skippedInactive + skippedBudget == due` on every completed tick.
-- [ ] `GET /admin/job-runs/{lastJobRunId}?api-version=1.0` with header `X-Test-Actor: {"Id":"admin","Permissions":["job-runs:read"]}` returns 200 with per-attempt detail. The per-attempt list includes the no-phone SMS row as `HardFailed` with a data-error reason and the transient-fake row as `SoftFailed`.
-- [ ] **Second tick** (wait another 30 seconds): `reminders.dispatched.total{channel=email}` increments by 1 (the transient row succeeds on retry) and a second `JobRun` row exists. Querying its detail shows the same `DispatchAttempt` row updated from `SoftFailed` to `Dispatched` — **not** a new attempt row inserted (verifies §11 idempotency: the unique constraint on `(SubscriptionId, Tier, Channel)` held).
+- [ ] `GET /admin/job-runs/{lastJobRunId}?api-version=1.0` with header `X-Test-Actor: {"Id":"admin","Permissions":["job-runs:read"]}` returns 200 with the §8 job-run shape (`id`, timestamps, `outcome`, `counts`, `failureSummary`).
+- [ ] For attempt-level smoke, query `DispatchAttempts` in `Reminders.db` and verify the no-phone SMS seed row is `HardFailed` with a data-error/no-phone reason and the transient-fake seed row is `SoftFailed`.
+- [ ] **Second tick** (wait another 30 seconds): `reminders.dispatched.total{channel=email}` increments by 1 (the transient row succeeds on retry) and a second `JobRun` row exists. Query `DispatchAttempts` in `Reminders.db` and verify the same `(SubscriptionId, Tier, Channel)` row moved from `SoftFailed` to `Dispatched` — **not** a new attempt row inserted (verifies §11 idempotency: the unique constraint on `(SubscriptionId, Tier, Channel)` held).
 
 ### 6c. Auth composition check (proves §10)
 
@@ -209,9 +210,9 @@ git commit -m "Implement Subscription Renewal Reminder Worker with Trellis"
 
 ## Step 8: Generate Trellis Feedback
 
-Attach `docs/feedback-format.md` to the chat as `FEEDBACK_FORMAT.md` (paperclip — same way you attached `SPEC.md` and `COVERAGE.md` in Step 4). Then ask Copilot to reflect on the development experience using the same prompt the OM lab uses:
+Ask Copilot to reflect on the development experience using the feedback format embedded in the scaffolded `.github/copilot-instructions.md` (same convention as the OM lab):
 
-> Review the entire codebase you just built — including any framework-feedback fixes I had you apply during this run. Generate `TRELLIS_FEEDBACK.md` at the repository root following `FEEDBACK_FORMAT.md` exactly: section order, field order, category/severity enums, hard constraints, and the "what to exclude" clause all apply.
+> Review the entire codebase you just built — including any framework-feedback fixes I had you apply during this run. Generate `TRELLIS_FEEDBACK.md` at the repository root following the feedback format in `.github/copilot-instructions.md` exactly: section order, field order, category/severity enums, hard constraints, and the "what to exclude" clause all apply.
 
 The prompt is intentionally **blind** — it does not name friction areas, so the feedback file is independent observation, not prompted confirmation. Friction the AI surfaces unprompted is the measurement.
 
