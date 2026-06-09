@@ -389,6 +389,6 @@ Score these separately from the core 57 — they measure whether the AI can **ev
 
 ## Where to go next
 
-- **Try another system shape.** The [Subscription Reminder Worker](training-lab-worker.md) lab teaches the non-HTTP `BackgroundService` shape (scheduled work, idempotency, actor composition). The [URL Shortener spec](../specs/url-shortener.md) covers an unversioned redirect host with `Idempotency-Key` and ETags.
+- **Try another system shape.** The [Subscription Reminder Worker](training-lab-worker.md) lab teaches the non-HTTP `BackgroundService` shape (scheduled work, idempotency, actor composition). The [URL Shortener](training-lab-url-shortener.md) lab covers an unversioned redirect host with `Idempotency-Key` and ETags.
 - **Read the framework.** [`xavierjohn/Trellis`](https://github.com/xavierjohn/Trellis) is the source for every concept above.
 - **Study the reference build** any time: [`after/OrderManagement/`](../after/OrderManagement/).
