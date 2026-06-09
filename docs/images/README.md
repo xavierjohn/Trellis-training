@@ -91,15 +91,18 @@ Regenerate with [`gen_radar.py`](gen_radar.py) (`python docs/images/gen_radar.py
 
 **Note:** Best as an actual screenshot from `https://localhost:7011/scalar/2026-11-12` after running the service.
 
-### 9. `rop-pipeline.png` (600×250)
-**Used in:** README.md bottom section
-**Concept:** Railway-oriented programming visualization. Show two parallel tracks (Success/Failure) with operations chained:
+### 9. `rop-pipeline.png` (landscape, displayed at width 600)
+**Used in:** README.md "What you're measuring" section
+**Concept:** Railway-oriented programming visualization based on the OM `SubmitOrder` handler. Two parallel tracks (success on top, failure on the bottom):
 ```
-GetOrder → Submit → SaveAsync → MapToDto
-   ↓          ↓         ↓          ↓
- NotFound → Invalid  → DbError → [propagates]
+FindById → Submit → Commit (UoW) → 200 OK (Order → DTO)
+   ↓          ↓           ↓
+NotFound  Insufficient  DbError  ─────→ ProblemDetails (RFC 9457)
+            Stock
 ```
-Success track on top (green/blue), failure track on bottom (red). Each operation is a box that can route to either track. Show how errors propagate without try/catch.
+Each step returns a `Result`; the first failure short-circuits onto the failure track and the remaining steps are skipped. The commit is a **framework pipeline stage** (`AddTrellisUnitOfWork<AppDbContext>` in `Acl/src/DependencyInjection.cs`) — handlers never call `SaveChanges`. Show how errors propagate without try/catch.
+
+Regenerate with [`gen_rop_pipeline.py`](gen_rop_pipeline.py) (`python docs/images/gen_rop_pipeline.py`).
 
 ---
 
