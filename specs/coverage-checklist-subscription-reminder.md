@@ -4,11 +4,11 @@ Companion to `specs/subscription-reminder-worker.md`. This checklist makes the e
 
 Each row should be a separate test (or a single parameterised test with named cases). A row is **green** when the implementation has at least the listed **positive** and **negative** assertions.
 
-Where it differs from `coverage-checklist.md` (the OM checklist): there are dedicated sections for the background-worker tick (§4), external-gateway error mapping (§5), idempotency (§6), and observability (§8). The OM HTTP-endpoint section (§5 in that file) shrinks here to two endpoints (§7).
+Where it differs from the OM lab's rubric (in [`docs/training-lab.md`](../docs/training-lab.md)): there are dedicated sections for the background-worker tick (§4), external-gateway error mapping (§5), idempotency (§6), and observability (§8); the OM lab's HTTP-endpoint coverage shrinks here to two admin endpoints (§7).
 
 ## Required eval minimum (subset)
 
-The rubric L4 (`docs/evaluation-criteria.md` Level 4) actually scores against this minimum subset. Rows outside the minimum are extended completeness — required for "test-complete" but not individually scored.
+The L4 (Tests) score is graded against this minimum subset. Rows outside the minimum are extended completeness — required for "test-complete" but not individually scored.
 
 | § | Minimum row |
 |---|---|

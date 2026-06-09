@@ -4,13 +4,13 @@ Companion to `specs/url-shortener.md`. This checklist makes the expected test co
 
 Each row should be a separate test (or a single parameterised test with named cases). A row is **green** when the implementation has at least the listed **positive** and **negative** assertions.
 
-Where it differs from `coverage-checklist.md` (the OM checklist): there are dedicated sections for the unversioned-host contract (§7.1), the redirect endpoint and its anonymous-access shape (§7.2), idempotency on POST (§4 and §5), and ETag round-trip (§6). The OM checklist's API-versioning rows (e.g., "request without `?api-version=` returns 400") have no equivalent here — by design.
+Where it differs from the OM lab's rubric (in [`docs/training-lab.md`](../docs/training-lab.md)): there are dedicated sections for the unversioned-host contract (§7.1), the redirect endpoint and its anonymous-access shape (§7.2), idempotency on POST (§4 and §5), and ETag round-trip (§6). The OM lab's API-versioning checks (e.g., "request without `?api-version=` returns 400") have no equivalent here — by design.
 
 Where it differs from `coverage-checklist-subscription-reminder.md` (the worker checklist): there is no §5 gateway-error mapping, no §4 worker-tick orchestration, no §3.3 counter-invariant. This service is HTTP-shaped end-to-end.
 
 ## Required eval minimum (subset)
 
-The rubric L4 (`docs/evaluation-criteria.md` Level 4) actually scores against this minimum subset. Rows outside the minimum are extended completeness — required for "test-complete" but not individually scored.
+The L4 (Tests) score is graded against this minimum subset. Rows outside the minimum are extended completeness — required for "test-complete" but not individually scored.
 
 | § | Minimum row |
 |---|---|
