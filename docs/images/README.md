@@ -9,15 +9,22 @@ Each image below needs to be created and placed in this folder. The README.md re
 **Concept:** Wide banner showing the intersection of AI and enterprise software development. Think: a neural network or circuit board pattern morphing into clean architectural blueprints. Color palette: deep navy, electric blue, white accents.
 **Text overlay:** "Trellis Training Lab" + "AI-Powered Enterprise Service Development"
 
-### 2. `architecture-overview.png` (700×400)
-**Used in:** README.md "What Gets Built" section
-**Concept:** The 4-layer clean architecture diagram. Four horizontal layers stacked:
+### 2. `architecture-overview.png` (landscape, displayed at width 700)
+**Used in:** README.md header (above the lab catalog)
+**Concept:** The 4-layer clean architecture diagram, stacked outer → inner to match the
+actual `*.csproj` dependency graph in `after/OrderManagement`:
 - **API** (top, blue) — Controllers, DTOs, Middleware
-- **Application** (green) — Commands, Queries, Handlers, Authorization
-- **Anti-Corruption Layer** (orange) — EF Core, Repositories, Configurations
+- **Anti-Corruption Layer** (orange) — EF Core (DbContext), Repositories, Configurations
+- **Application** (green) — Commands, Queries, Handlers, Authorization, Repository Interfaces
 - **Domain** (purple, bottom) — Aggregates, Entities, Value Objects, Events, Specifications
 
-Arrows showing dependency direction (outer layers depend inward). Each layer shows key types it contains.
+Arrows point in the direction of dependency (outer layers depend inward): `API → ACL → Application → Domain`,
+plus an `API → Application` skip arrow. The Anti-Corruption Layer is an **outer** layer — it implements
+the repository interfaces declared in Application (Dependency Inversion), so it depends on Application
+rather than sitting between Application and Domain.
+
+Regenerate with [`gen_architecture.py`](gen_architecture.py) (`python docs/images/gen_architecture.py`);
+source of truth is the `ProjectReference` graph under `after/OrderManagement`.
 
 ### 3. `order-lifecycle.png` (600×350)
 **Used in:** README.md "What Gets Built" section
