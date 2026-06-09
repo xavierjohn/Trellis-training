@@ -347,13 +347,13 @@ Everything above teaches one person to build one service. The same lab, run **ma
 **Scriptable structural checks** (run from the service root):
 
 ```bash
-grep -rl "try" Domain/src Application/src --include="*.cs" | xargs -r grep -c "try {" ; # expect 0
-grep -rn "Guid " Domain/src --include="*.cs" | grep -v "RequiredGuid" | wc -l ;          # expect 0
-grep -r "HasConversion" Acl/src --include="*.cs" | wc -l ;                                 # expect 0
-grep -r "ApplyTrellisConventions" Acl/src --include="*.cs" | wc -l ;                       # expect 1
-grep -r "ICommand<Result" Application/src --include="*.cs" | wc -l ;                        # expect 11 (one per command)
-grep -rE "\[Http(Get|Post|Delete)\]" Api/src --include="*.cs" | wc -l ;                     # expect 14
-grep -rn "SaveChanges" Application/src Acl/src --include="*.cs" | wc -l ;                   # expect 0 in handlers/repos (UoW commits)
+grep -rnw "catch" Domain/src Application/src --include="*.cs" | wc -l ;                  # 0 — no exception handling on the happy path
+grep -rn "Guid " Domain/src --include="*.cs" | grep -vE "RequiredGuid|ValidateAdditional" | wc -l ;  # 0 — generated VO validation hooks excluded
+grep -r "HasConversion" Acl/src --include="*.cs" | wc -l ;                               # 0 — conventions, not manual converters
+grep -r "ApplyTrellisConventions" Acl/src --include="*.cs" | wc -l ;                     # 1
+grep -r "ICommand<Result" Application/src --include="*.cs" | wc -l ;                     # 11 — one per command
+grep -rE "\[Http" Api/src --include="*.cs" | wc -l ;                                     # 16 — 14 spec endpoints + 2 hidden GET-by-id helper routes
+grep -rn "SaveChanges" Application/src Acl/src --include="*.cs" | wc -l ;                # only XML-doc mentions; zero actual calls (the UoW behavior commits)
 ```
 
 ### Supplementary: feature-addition (Step 8)

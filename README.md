@@ -179,6 +179,7 @@ Trellis-training/
 ├── docs/
 │   ├── training-lab.md                                  # OM lab — operator guide + rubric
 │   ├── training-lab-worker.md                           # Subscription-reminder worker — operator guide
+│   ├── training-lab-url-shortener.md                    # URL shortener — operator guide
 │   └── images/                                          # Visual assets
 ├── specs/                                               # Lab specs (paste into Copilot)
 │   ├── order-management.md
