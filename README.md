@@ -30,7 +30,7 @@ Pick a business spec, hand it to an AI (GitHub Copilot or any model you like), a
 
 Completing a lab shows you, in working code, how Trellis shapes:
 
-- **Clean Architecture** — `Domain → Application → Anti-Corruption Layer → API`, with dependencies pointing inward.
+- **Clean Architecture** — `API → Anti-Corruption Layer → Application → Domain`, with dependencies pointing inward.
 - **Railway-Oriented Programming** — `Result<T>` / `Maybe<T>` chains (`Bind` / `Map` / `Ensure`) with no try/catch on the happy path.
 - **Rich domain modeling** — value objects, `RequiredEnum<T>` smart enums, aggregates, entities, and specifications.
 - **State machines** — `LazyStateMachine` driving an order lifecycle with guarded transitions and stock side effects.
@@ -88,9 +88,9 @@ Every lab follows the same 8-step procedure. The Order Management guide ([`docs/
 | **5** | Manual smoke test (`.http` file for HTTP labs; `/health` polling for worker labs) | 5 min |
 | **6** | Review generated code | 5 min |
 | **7** | AI generates `TRELLIS_FEEDBACK.md` | 2 min |
-| **8** | AI adds an incremental feature (OM: Order Returns; worker: SLA policy override; URL shortener: bulk-import endpoint) | 10-15 min |
+| **8** | AI adds an incremental feature — **OM lab only** (Order Returns). The worker and URL-shortener labs are single-shot (Steps 1–7). | 10-15 min |
 
-**Total: ~45 minutes per run.** Each operator guide names the lab-specific Step 4 attachments, Step 5 smoke verification, and Step 8 feature.
+**Total: ~45 minutes per run** for the OM lab; the single-shot worker and URL-shortener labs run ~30. Each operator guide names the lab-specific Step 4 attachments and Step 5 smoke verification.
 
 ## Lab catalog
 
@@ -100,7 +100,7 @@ Each lab targets a different **system shape**, so you learn how Trellis handles 
 |---|---|---|---|
 | **Order Management** | CRUD + state machine + versioned API + EF Core | [`specs/order-management.md`](specs/order-management.md) | [`docs/training-lab.md`](docs/training-lab.md) |
 | **Subscription Reminder Worker** | `BackgroundService` + scheduled work + non-HTTP pipeline + cross-pipeline actor composition | [`specs/subscription-reminder-worker.md`](specs/subscription-reminder-worker.md) | [`docs/training-lab-worker.md`](docs/training-lab-worker.md) |
-| **URL Shortener** | Unversioned HTTP + write-then-redirect + `Idempotency-Key` + ETag + anonymous redirect alongside permission-gated CRUD | [`specs/url-shortener.md`](specs/url-shortener.md) | *operator guide TBD* |
+| **URL Shortener** | Unversioned HTTP + write-then-redirect + `Idempotency-Key` + ETag + anonymous redirect alongside permission-gated CRUD | [`specs/url-shortener.md`](specs/url-shortener.md) | [`docs/training-lab-url-shortener.md`](docs/training-lab-url-shortener.md) |
 
 > Checklists live alongside the specs: the OM checklist is embedded in its operator guide; the worker and URL-shortener labs use the [`specs/coverage-checklist-*.md`](specs/) files.
 
@@ -179,6 +179,7 @@ Trellis-training/
 ├── docs/
 │   ├── training-lab.md                                  # OM lab — operator guide + rubric
 │   ├── training-lab-worker.md                           # Subscription-reminder worker — operator guide
+│   ├── training-lab-url-shortener.md                    # URL shortener — operator guide
 │   └── images/                                          # Visual assets
 ├── specs/                                               # Lab specs (paste into Copilot)
 │   ├── order-management.md

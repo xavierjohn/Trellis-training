@@ -1,19 +1,104 @@
-# Trellis Training Lab — Building Services with AI
+# Trellis Training Lab — Order Management
 
-> **Purpose:** Measure how consistently AI builds enterprise services using the Trellis framework. Give the AI the spec + copilot instructions and let it implement the entire service in one shot. This same guide doubles as an eval — run it 10 times to measure consistency.
-
-## Prerequisites
-
-- GitHub Copilot access (Copilot Chat in VS Code)
-- .NET 10 SDK installed
-- VS Code or Visual Studio
-- Docker Desktop (optional — for Aspire Dashboard telemetry viewer)
-- Trellis ASP template installed (`dotnet new install Trellis.AspTemplate`)
-- Basic understanding of C# and web APIs
+> **Learn to build a production-shaped enterprise service on the [Trellis](https://github.com/xavierjohn/Trellis) framework** by guiding an AI through a real business spec — then studying *exactly* what it built and *why* each pattern is there. By the end you'll be able to read, run, extend, and review an idiomatic Trellis service.
+>
+> 🧪 This same lab doubles as an **AI-consistency eval**. Running it across models measures how tightly Trellis steers them. That's a useful side effect — if you're here to *learn*, ignore it and follow the steps. The eval mechanics live at the end under [Running this as a consistency eval](#running-this-as-a-consistency-eval-optional).
 
 ---
 
-## Step 1: Create a Project Directory
+## Who this is for
+
+A C# developer who knows web APIs but is **new to Trellis**, and wants to see how the framework's building blocks fit together in a realistic service. You don't write the implementation by hand — you give an AI the spec and the framework's own conventions, let it build, and then **read the result as your textbook**. You learn the patterns by seeing them applied end-to-end, not from a wall of theory.
+
+## What you'll build
+
+The **Order Management** service: customers, products with inventory, and orders that move through a state machine (`Draft → Submitted → Approved → Shipped → Delivered`, with `Cancel`). It has role-based authorization, a versioned HTTP API, EF Core persistence, OpenTelemetry, and a full test suite — roughly 70 source files, all generated from one spec.
+
+<p align="center">
+  <img src="images/before-after.png" alt="Before and After — from template scaffold to a full Trellis Order Management service" width="700"/>
+</p>
+
+## What you'll learn
+
+By the end you'll understand, in working code, how Trellis shapes each of these — and *why*:
+
+- **Clean Architecture** with an enforced dependency rule (`API → Anti-Corruption Layer → Application → Domain`).
+- **Railway-Oriented Programming** — `Result<T>` / `Maybe<T>` instead of exceptions and nulls.
+- **Domain modeling without primitive obsession** — value objects, smart enums, aggregates, entities, specifications.
+- **A state machine** that makes illegal order transitions impossible.
+- **CQRS** with a Mediator pipeline that handles validation, authorization, and transactions as cross-cutting behaviors.
+- **EF Core the Trellis way** — convention-based mapping and a Unit-of-Work commit (handlers never call `SaveChanges`).
+- **Authorization** by permission and by resource ownership — declared, not hand-rolled.
+- **Testing** with `Trellis.Testing`'s `Result` / `Maybe` assertions.
+
+---
+
+## Core Trellis concepts you'll meet
+
+Skim this once now; you'll *recognize* each pattern when you read the generated code, and the [guided tour](#guided-tour-of-the-reference-implementation) points you at the exact file for each. Don't memorize it — the goal is to know what to look for.
+
+| Concept | What it is | Why Trellis uses it | First see it in |
+|---|---|---|---|
+| **`Result<T>` + Railway-Oriented Programming** | A return type carrying either a value or an `Error`. Operations chain with `Bind` / `Map` / `Ensure`; the first failure short-circuits the rest. | Expected failures become **values, not exceptions** — explicit in signatures, trivially testable, no hidden control flow. | `Domain/src/Aggregates/Order.cs` |
+| **`Maybe<T>`** | An explicit "optional" type. Absence is a value, not `null`. | The type system tells you a value may be missing, so there are no surprise `NullReferenceException`s. | `Customer.PhoneNumber` |
+| **Value objects (no primitive obsession)** | `RequiredGuid<T>`, `RequiredString<T>`, `RequiredInt<T>`, `RequiredEnum<T>`, etc. Each validates itself via `TryCreate` returning a `Result`. | Invalid states become **unrepresentable**, and `CustomerId` can't be passed where an `OrderId` is expected. | `Domain/src/ValueObjects/` |
+| **DDD building blocks** | `Aggregate<TId>`, `Entity<TId>`, `Specification<T>`. | Business rules live **in the domain**, not scattered across handlers; specifications are reusable, testable, EF-translatable predicates. | `Order`, `LineItem`, `OverdueOrderSpecification` |
+| **State machine** | A `LazyStateMachine<TState, TTrigger>`; transitions are guarded and return a `Result`. | Illegal transitions (e.g. shipping a draft) are **impossible by construction**, not by `if` checks. | `Domain/src/Aggregates/Order.cs` |
+| **CQRS + Mediator pipeline** | Each operation is a `Command`/`Query` with a handler; validation, authorization, and the transaction are **pipeline behaviors**. | Handlers stay thin and domain-focused; cross-cutting policy is applied uniformly and can't be forgotten. | `Application/src/Orders/` |
+| **Clean Architecture** | Four projects; dependencies point inward. Repository **interfaces** live in Application; EF Core implementations live in the ACL (Dependency Inversion). | The domain stays pure and infrastructure is swappable; the ACL is an *outer* layer, not a layer between Application and Domain. | the four `*/src` projects |
+| **Authorization** | `IAuthorize` (permissions) and `IAuthorizeResource<T>` (ownership), resolved by pipeline behaviors. | Authorization is **declarative metadata**, not `if (actor != owner)` checks buried in handlers. | `CancelOrderCommand` |
+| **EF Core conventions + Unit of Work** | `ApplyTrellisConventions`, interceptors, and `AddTrellisUnitOfWork<TContext>` — the pipeline commits once at the end. | Almost zero mapping boilerplate, and **handlers never call `SaveChanges`** — the commit is atomic and framework-driven. | `Acl/src/` |
+| **`Trellis.Testing`** | Assertions like `.Should().BeSuccess()`, `.Should().HaveValue()`, `.Should().BeNone()`, plus fakes. | Tests assert on `Result` / `Maybe` directly instead of unwrapping and null-checking. | `*/tests/` |
+
+These three diagrams capture the spine of the service — refer back to them as you build:
+
+<p align="center">
+  <img src="images/architecture-overview.png" alt="Clean Architecture — API, Anti-Corruption Layer, Application, Domain" width="640"/>
+</p>
+<p align="center">
+  <img src="images/order-lifecycle.png" alt="Order state machine — Draft through Delivered with Cancel transitions" width="560"/>
+</p>
+<p align="center">
+  <img src="images/rop-pipeline.png" alt="Railway-Oriented Programming — Result chains flowing through a handler" width="560"/>
+</p>
+
+> 📚 **Where the deep reference lives:** the scaffold (next step) drops a set of `.github/trellis-api-*.md` files — the authoritative, package-synced API reference (`trellis-api-core.md`, `trellis-api-primitives.md`, `trellis-api-efcore.md`, `trellis-api-asp.md`, `trellis-api-authorization.md`, `trellis-api-statemachine.md`, `trellis-api-testing-reference.md`, `trellis-api-cookbook.md`, and more) — alongside `.github/copilot-instructions.md`, which tells the AI *how* to build with Trellis. You don't need to read them cover to cover; dip in when a concept above is unfamiliar.
+
+---
+
+## Prerequisites
+
+- .NET 10 SDK
+- VS Code or Visual Studio
+- GitHub Copilot (Copilot Chat in VS Code) — or another AI model you want to drive the build
+- The Trellis ASP template: `dotnet new install Trellis.AspTemplate`
+- Docker Desktop *(optional — for the Aspire Dashboard telemetry viewer)*
+- Basic C# and web-API familiarity
+
+---
+
+## The workflow at a glance
+
+Every lab is the same 8 steps. Steps **4** and **8** are where the AI writes code; the rest is setup, verification, and learning.
+
+<p align="center">
+  <img src="images/step-flow.png" alt="8 steps — Create Project, Aspire Dashboard, Scaffold, AI Implements, Smoke Test, Review, Feedback, Add Feature" width="760"/>
+</p>
+
+| Step | What happens | Time |
+|------|-------------|------|
+| 1 | Create the project directory | 1 min |
+| 2 | Start the Aspire Dashboard | 2 min |
+| 3 | Scaffold with `dotnet new trellis-asp` | 2 min |
+| 4 | Paste the spec into Copilot — **AI implements the service** | 10–30 min |
+| 5 | Manual smoke test | 5 min |
+| 6 | Read & review the generated code *(this is the learning)* | 5–15 min |
+| 7 | AI generates `TRELLIS_FEEDBACK.md` | 2 min |
+| 8 | **AI adds a feature** (Order Returns) to prove the architecture evolves | 10–15 min |
+
+---
+
+## Step 1: Create a project directory
 
 ```bash
 mkdir OrderManagement
@@ -21,11 +106,9 @@ cd OrderManagement
 git init
 ```
 
----
-
 ## Step 2: Start the Aspire Dashboard
 
-The Aspire Dashboard lets you view traces, metrics, and structured logs. Run it locally via Docker:
+The Aspire Dashboard shows traces, metrics, and structured logs as you test — your window into what the running service does.
 
 ```powershell
 docker run --rm -it -d -p 18888:18888 -p 4317:18889 -e ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true --name aspire-dashboard mcr.microsoft.com/dotnet/aspire-dashboard:latest
@@ -36,549 +119,276 @@ docker run --rm -it -d -p 18888:18888 -p 4317:18889 -e ASPIRE_DASHBOARD_UNSECURE
 | `18888` | Dashboard UI — open http://localhost:18888 |
 | `4317` | OTLP gRPC receiver — apps send telemetry here |
 
-Verify it's running:
+Verify it's running: `docker ps`.
+
+## Step 3: Scaffold with the template
 
 ```bash
-docker ps --format "table {{.Image}}\t{{.Ports}}\t{{.Status}}"
-```
-
----
-
-## Step 3: Scaffold with Template and Add Spec
-
-1. Install the Trellis template (first time only — skip if already installed):
-
-```bash
-dotnet new install Trellis.AspTemplate
-```
-
-2. Scaffold the project:
-
-```bash
+dotnet new install Trellis.AspTemplate     # first time only
 dotnet new trellis-asp -n OrderManagement --authorName "Your Name"
 ```
 
-This creates the full solution structure including:
-- `.github/copilot-instructions.md` — Trellis conventions for AI
-- `.github/trellis-api-reference.md` — Complete Trellis API surface reference
-- All project files, build system (`Directory.Build.props`, `Directory.Packages.props`, `build/test.props`), and test infrastructure
-- `.gitignore` configured for .NET/Visual Studio
-- Working sample code (BestWeatherForecast) replaced with your service name
+This creates the full solution: the four-project Clean Architecture layout, the build system (`Directory.Build.props`, `Directory.Packages.props`, `build/test.props`), test infrastructure, a `.gitignore`, a **working sample service** (a small WeatherForecast app you'll replace), and — importantly for the AI — `.github/copilot-instructions.md` plus the `.github/trellis-api-*.md` reference files.
 
-3. Verify the template builds and tests pass:
+Verify the scaffold builds and its sample tests pass, then commit:
 
 ```bash
 dotnet build
 dotnet test
+git add -A && git commit -m "Scaffold with Trellis template"
 ```
 
-All 38 template tests should pass before you proceed.
+> **Why scaffold instead of letting the AI create everything?** The template owns the boilerplate — project structure, package wiring, DI, global usings — so the AI spends its budget on **business logic**, not plumbing, and every run starts from an identical, known-good baseline. The `copilot-instructions.md` + `trellis-api-*.md` files are what make the AI's output idiomatic and consistent.
 
-4. Commit:
+## Step 4: Implement the service
 
-```bash
-git add -A
-git commit -m "Scaffold with Trellis template"
-```
-
-> **Why this approach?** The `dotnet new` template handles all scaffolding — project structure, build system, package references, global usings, and DI wiring. This eliminates token waste on boilerplate and ensures the AI focuses exclusively on implementing business logic. The copilot instructions (`.github/copilot-instructions.md`) tell the AI *how* to build with Trellis, and the API reference (`.github/trellis-api-reference.md`) gives it the full type surface.
-
----
-
-## Step 4: Implement the Service
-
-Open Copilot Chat, paste the **entire contents** of `specs/order-management.md` as context, and follow it with this prompt:
+Open Copilot Chat, paste the **entire contents** of [`specs/order-management.md`](../specs/order-management.md) as context, then prompt:
 
 > Implement the Order Management service according to the spec above. Replace the existing sample code with the Order Management domain.
 
-**Alternate prompt (SQL Server):** If you prefer SQL Server over SQLite, add to the prompt: *"Use SQL Server instead of SQLite. Use a separate console app to apply EF Core migrations instead of applying them on web service startup."*
+**Alternate (SQL Server):** add *"Use SQL Server instead of SQLite. Apply EF Core migrations from a separate console app instead of on web-service startup."*
 
-**Let the AI work.** Do not intervene unless it asks a clarifying question. If it asks, answer with: "Follow the spec and copilot instructions."
-
-**When it finishes, verify the build:**
+**Let the AI work.** Don't intervene unless it asks a clarifying question — if it does, answer *"Follow the spec and copilot instructions."* When it finishes:
 
 ```bash
 dotnet build
 dotnet test
 ```
 
-If there are build or test errors, paste them back to Copilot and let it fix them. Repeat until clean.
+If there are build or test errors, paste them back and let Copilot fix them. Repeat until clean.
 
----
+> **What just happened?** The AI read the *business* requirements from the spec and the *implementation* conventions from `copilot-instructions.md`, then built the service layer by layer in build order (`Domain → Application → Acl → Api → Tests`), compiling between layers because Trellis source generators emit code each build. You'll see the result in Step 6.
 
-## Step 5: Manual Smoke Test
+## Step 5: Manual smoke test
 
-Start the application with telemetry pointed at the Aspire Dashboard:
+Run the service with telemetry pointed at the dashboard:
 
-**PowerShell:**
 ```powershell
 $env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4317"
 $env:OTEL_EXPORTER_OTLP_PROTOCOL = "grpc"
 dotnet run --project Api/src
 ```
 
-**Bash:**
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 OTEL_EXPORTER_OTLP_PROTOCOL=grpc dotnet run --project Api/src
-```
+(Bash: `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 OTEL_EXPORTER_OTLP_PROTOCOL=grpc dotnet run --project Api/src`)
 
-Open the **Aspire Dashboard** at http://localhost:18888 to view traces, metrics, and structured logs as you test.
+Open the **Aspire Dashboard** (http://localhost:18888) and watch the traces while you exercise the API with the generated `.http` file (the [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension). Walk the happy path *and* the guardrails:
 
-Use the `.http` file with the [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension in VS Code. The smoke test should cover:
+1. **Create a customer** (as SalesRep) → `201 Created` + Location header
+2. **Create a customer without a phone** → `201 Created`, phone absent
+3. **Create a product** (as WarehouseManager) → `201 Created`
+4. **Add stock** → `200`, stock updated
+5. **Create a draft order** (as SalesRep) → `201 Created`, status `Draft`
+6. **Submit the order** → `200`, status `Submitted` (stock reserved)
+7. **Cancel as a *different* SalesRep** → `403 Forbidden` (not the owner)
+8. **Approve without permission** → `403 Forbidden`
+9. **Approve as WarehouseManager** → `200`
+10. **Cancel as the original creator** → `200`, stock restored
+11. **Health check** (`/health`) → `200`
 
-1. **Create a customer** (as SalesRep) → expect `201 Created` with Location header
-2. **Create a customer without phone** → expect `201 Created`, PhoneNumber absent/null
-3. **Create a product** (as WarehouseManager) → expect `201 Created`
-4. **Add stock** → expect `200`, stock updated
-5. **Create draft order** (as SalesRep) → expect `201 Created`, status = Draft
-6. **Submit the order** → expect `200`, status = Submitted
-7. **Cancel as different SalesRep** → expect `403 Forbidden` (not the owner)
-8. **Approve without permission** → expect `403 Forbidden`
-9. **Approve as WarehouseManager** → expect `200`
-10. **Cancel as original creator** → expect `200`, stock restored
-11. **Health check** → expect `200`
+Each line maps to a concept: 7–8 exercise authorization, 6 & 10 exercise the state machine and stock side effects, 2 exercises `Maybe<T>`.
 
-If any response is wrong, note it for evaluation but **do not fix it** during eval runs.
+## Step 6: Read and review the generated code — *this is the learning*
 
----
-
-## Step 6: Review and Commit
-
-1. Review all generated code against the evaluation criteria below.
-2. Note issues but **do not fix them** during eval runs — they become your scores.
-3. Commit:
+Don't skip this — **reading the output is the point of the lab.** Use the [Guided tour](#guided-tour-of-the-reference-implementation) below to walk the code in a sensible order, and check it against [What "good" looks like](#what-good-looks-like-and-why). Then commit:
 
 ```bash
-git add -A
-git commit -m "Implement Order Management Service with Trellis"
+git add -A && git commit -m "Implement Order Management Service with Trellis"
 ```
 
----
+## Step 7: Generate Trellis feedback
 
-## Step 7: Generate Trellis Feedback
+Ask Copilot to reflect — this is how friction in the framework gets surfaced:
 
-Ask Copilot to reflect on the development experience:
+> Review the entire codebase you just built. Generate a `TRELLIS_FEEDBACK.md` following the format in the copilot instructions. Be specific about friction points, workarounds, or missing features, and also note what worked well.
 
-> Review the entire codebase you just built. Generate a TRELLIS_FEEDBACK.md file following the format in the copilot instructions. Be specific about any friction points, workarounds, or missing features you encountered. Also note what worked well.
+Verify it contains severity-ranked friction points (each with context + a suggested improvement), a "What Worked Well" section, and any copilot-instructions ambiguities. Commit it.
 
-**What to verify:**
+## Step 8: Add a feature — Order Returns
 
-- [ ] `TRELLIS_FEEDBACK.md` exists in the repository root
-- [ ] Each friction point has a category, severity, context, and suggested improvement
-- [ ] Workaround code is included where applicable
-- [ ] "What Worked Well" section is present and specific
-- [ ] Copilot Instructions Feedback section addresses any ambiguities encountered
-- [ ] Feedback is actionable — the Trellis team can read each entry and decide whether to act on it
+> **Why this step matters most.** Real services *change*. This step proves the architecture you just built absorbs a new requirement without regressions — the single most important real-world property. It's also the step that most cleanly separates a model that *pattern-matched* the spec from one that *understood* the design.
 
-```bash
-git add TRELLIS_FEEDBACK.md
-git commit -m "Add Trellis feedback"
-```
-
----
-
-## Step 8: Add a Feature — Order Returns
-
-> **Purpose:** Demonstrate that the architecture you just built supports incremental change. Give the AI a new business requirement and let it modify the existing codebase. This tests whether Trellis patterns hold up when requirements evolve — the real-world scenario.
-
-### The Business Requirement
-
-A new business rule has been approved: **customers can return delivered orders within 30 days.**
-
-Paste this into Copilot Chat as a follow-up prompt (in the same conversation that built the service):
+**The new rule:** customers can return delivered orders within 30 days. Paste this into the **same** Copilot conversation:
 
 > **New requirement: Order Returns**
 >
-> Customers can now return delivered orders. Add the following to the existing Order Management service:
+> Customers can now return delivered orders. Add the following to the existing service:
 >
-> **Domain changes:**
-> - Add `Returned` to the OrderStatus enum
+> **Domain:**
+> - Add `Returned` to the `OrderStatus` enum
 > - Add a `ReturnReason` value object — required string, 10–500 characters
-> - Add `DeliveredAt` as a `Maybe<DateTime>` property on Order (set during Delivered transition)
-> - Add `ReturnedAt` as a `Maybe<DateTime>` property on Order (set during Return transition)
-> - Add state transition: `Delivered → Returned`
->   - Precondition: Order must have been delivered within the last 30 days (`DeliveredAt` must exist and be no more than 30 days ago)
->   - Side effect: Release reserved stock for each line item (same as cancel)
->   - Side effect: Set `ReturnedAt` to current UTC time
+> - Add `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTime>` on `Order` (set during the Delivered and Return transitions)
+> - Add transition `Delivered → Returned`
+>   - Precondition: delivered within the last 30 days (`DeliveredAt` exists and ≤ 30 days ago)
+>   - Side effect: release reserved stock for each line item (same as cancel)
+>   - Side effect: set `ReturnedAt` to now
 >   - Domain event: `OrderReturnedEvent(OrderId, CustomerId, ReturnReason, ReturnedAt)`
-> - Shipped and Cancelled orders cannot be returned
-> - Already-returned orders cannot be returned again
+> - Shipped and Cancelled orders cannot be returned; already-returned orders cannot be returned again
 >
-> **Application changes:**
-> - Add `ReturnOrderCommand` with `orders:return` permission
-> - Add `ReturnOrderHandler` — fetches order + products, validates return window, fires transition, releases stock, saves
-> - Add permission: `orders:return` to Permissions class
-> - SalesRep role gets `orders:return` permission
+> **Application:** add `ReturnOrderCommand` (permission `orders:return`) + handler; grant `orders:return` to SalesRep.
 >
-> **API changes:**
-> - Add endpoint: `POST /api/orders/{id}/return` with body `{ "reason": "..." }`
-> - Returns 200 OK with updated order on success
-> - Returns 400 if return window expired or invalid transition
-> - Returns 404 if order not found
-> - Returns 403 if missing permission
+> **API:** `POST /api/orders/{id}/return` with body `{ "reason": "..." }` → 200 on success, 400 on expired window / invalid transition, 404 if not found, 403 if missing permission.
 >
-> **Test changes:**
-> - Domain: return within window succeeds, return after 30 days fails, return from non-Delivered status fails, stock released on return
-> - Application: handler happy path, missing permission
-> - API: HTTP round-trip for successful return, 400 for expired window
->
-> **EF changes:**
-> - Add `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTime>` properties on Order — the source generator and `MaybeConvention` handle persistence automatically
+> **Tests:** domain (return within window, after 30 days, from non-Delivered status, stock released), application (happy path, missing permission), API (HTTP round-trip, 400 for expired window).
 
-### What This Tests
-
-This exercise specifically validates that:
-
-| What | Why It Matters |
-|------|---------------|
-| **State machine modification** | Can the AI add a new status + transition to an existing Stateless machine without breaking existing transitions? |
-| **New value object** | Does the source generator pattern hold for additions? |
-| **Aggregate modification** | Can the AI add properties and methods to an existing aggregate? |
-| **Stock release reuse** | Does the AI recognize that return stock release is the same pattern as cancel? |
-| **Time-based business rule** | Like the overdue spec, this has a time constraint — does the AI make it testable (injectable date)? |
-| **Existing test preservation** | Do ALL existing tests still pass after the modification? |
-| **Full pipeline** | Does the new command wire through authorization, validation, handler, repository, controller, DTO correctly? |
-
-### Verification
+Then verify **zero regressions**:
 
 ```bash
-dotnet build    # 0 errors
-dotnet test     # All previous tests pass + new return tests pass
+dotnet build     # 0 errors
+dotnet test      # all previous tests pass + new return tests pass
+git add -A && git commit -m "Add Order Returns feature"
 ```
 
-**Check specifically:**
-- [ ] Existing tests still pass (zero regressions)
-- [ ] `Returned` exists in OrderStatus enum
-- [ ] `ReturnReason` value object with TryCreate validation (10-500 chars)
-- [ ] `DeliveredAt` is `Maybe<DateTime>` on Order, set during Delivered transition
-- [ ] `ReturnedAt` is `Maybe<DateTime>` on Order, set during Return transition
-- [ ] State machine allows `Delivered → Returned` only
-- [ ] Return checks 30-day window from `DeliveredAt`
-- [ ] Stock release runs on return (same as cancel from Submitted/Approved)
-- [ ] `OrderReturnedEvent` raised with reason
-- [ ] `orders:return` permission added to Permissions class
-- [ ] `ReturnOrderCommand` implements `IAuthorize`
-- [ ] `POST /api/orders/{id}/return` endpoint exists with correct versioning
-- [ ] Domain tests cover: valid return, expired window, invalid source status
-- [ ] API test covers HTTP round-trip
+Watch for whether the AI **reuses** the cancel stock-release pattern, keeps the new time rule **testable** (injectable clock), and leaves every existing test green. The supplementary [feature-addition checklist](#supplementary-feature-addition-step-8) lists exactly what to look for.
 
-### Commit
+---
+
+## Guided tour of the reference implementation
+
+You don't have to run anything to learn from this — a complete, passing reference build lives in [`after/OrderManagement/`](../after/OrderManagement/). Read it in this order; at each stop, notice the **idiom** in the right-hand column.
+
+| Read | Notice |
+|---|---|
+| `Domain/src/ValueObjects/` (`CustomerId.cs`, `Sku.cs`, `UnitPrice.cs`, …) | Every domain concept is its own type with a private ctor + `TryCreate`. No raw `Guid`/`string`/`decimal` crosses a domain boundary. |
+| `Domain/src/ValueObjects/OrderStatus.cs` | A `RequiredEnum<T>` smart enum — not a C# `enum`. It carries behavior and converts cleanly for JSON and EF Core. |
+| `Domain/src/Aggregates/Order.cs` | The aggregate: a `LazyStateMachine` configures guarded transitions; methods like `Submit`/`Cancel` return `Result` and thread side effects with `Bind`/`Map`/`Tap`. This is ROP and the state machine in one file. |
+| `Domain/src/Specifications/OverdueOrderSpecification.cs` | A reusable, testable, EF-translatable predicate — business rules as objects. |
+| `Application/src/Orders/` | Commands/queries + handlers; repository **interfaces** (`IOrderRepository`) live here. Note `CancelOrderCommand` carries `IAuthorize` + resource-authorization metadata — the handler has no `if (actor != owner)`. |
+| `Acl/src/` (`AppDbContext.cs`, `*Configuration.cs`, `*Repository.cs`, `DependencyInjection.cs`) | `ApplyTrellisConventions` (almost no manual mapping), repository **implementations** of the Application interfaces (Dependency Inversion), and `AddTrellisUnitOfWork<AppDbContext>` — the commit is wired here, not in handlers. |
+| `Api/src/2026-11-12/` (`Controllers/`, `Models/`) | Thin controllers that bind value objects, send the command, and map the `Result` to an HTTP response + DTO. Versioning is by namespace/folder. |
+| `*/tests/` | `Trellis.Testing` assertions (`.Should().BeSuccess()`, `.Should().HaveValue()`), state-machine transition tests, authorization tests, and full HTTP round-trips. |
+
+---
+
+## What "good" looks like (and why)
+
+These are the properties of a correct Trellis implementation — treat them as your **definition of done** for Step 6. For each, the *why* is the lesson; the *how to check* is how you confirm it. (When you use this lab as an eval, these same rows become scored criteria — see the [eval section](#running-this-as-a-consistency-eval-optional). Criteria marked **(T)** are provided by the template, so they verify the AI *preserved* the scaffold rather than broke it.)
+
+The Order Management lab scores against **57 criteria across five levels**; a passing implementation reaches **52+/57**. The Step 8 feature-addition check is supplementary and scored separately.
+
+### Level 1 — Structural (18) · *Are the right building blocks present?*
+
+| Property | How to check | Why it matters |
+|---|---|---|
+| Value objects exist | `CustomerId`, `OrderId`, `ProductId`, `LineItemId`, `Sku`, `UnitPrice`, `ShippingAddress`, `FirstName`, `LastName`, `ProductName`, `Quantity` are distinct types | No primitive obsession; the type system encodes domain identity |
+| Value objects use `TryCreate` | each returns `Result<T>` from a private ctor | Validity is established once, at construction |
+| Aggregates inherit `Aggregate<TId>` | `Customer`, `Product`, `Order` | DDD identity, equality, and domain-event support |
+| Line items are entities | `LineItem : Entity<LineItemId>` | Identity within the aggregate boundary |
+| State machine uses a guarded machine | `Order` transitions via `LazyStateMachine` + `FireResult` | Transitions are validated centrally |
+| Transitions return `Result` | not `void`/throw | Illegal transitions surface as values |
+| Domain events defined | all 5 events from the spec | The domain announces what happened |
+| Specification exists | `OverdueOrderSpecification : Specification<Order>` | Reusable, translatable business rule |
+| CQRS used | every operation is a Command/Query + handler via Mediator | Uniform, testable application layer |
+| Authorization on commands | commands implement `IAuthorize`; `CancelOrderCommand` adds resource authorization | Declarative, not hand-rolled |
+| Permissions as constants | a `Permissions` class in Domain | One source of truth for permission strings |
+| Repository interfaces in Application | `I*Repository` in Application, **not** Domain | Domain stays persistence-agnostic |
+| EF Core in the ACL **(T)** | `DbContext` + repo impls in `Acl` | Infrastructure is an outer layer |
+| `ApplyTrellisConventions` used **(T)** | no manual `HasConversion()` | Convention over boilerplate |
+| Project structure matches template **(T)** | the four-project layout | Consistent, navigable architecture |
+| No exceptions for control flow | zero `try/catch` in Domain/Application | Failures are values, not throws |
+| `build/test.props` shared **(T)** | present; no `GlobalUsings.cs` in test projects | Centralized test config |
+| No primitive obsession | no raw `Guid`/`string` params in domain methods | Validity at the type level |
+
+### Level 2 — Behavioral (13) · *Does the business logic work?*
+
+| Property | Why it matters |
+|---|---|
+| Submit validates stock before reserving | Inventory integrity |
+| Cancel from Submitted/Approved releases stock; **Cancel from Draft does not** | Stock is only reserved at Submit, so a Draft cancel has nothing to release |
+| Line-item price is a snapshot at creation | Orders don't silently re-price |
+| Duplicate product in an order is rejected | One line per product |
+| The last line item can't be removed | An order always has content |
+| Error taxonomy is correct | `Validation` / `NotFound` / `Conflict` / `Forbidden` used per the spec |
+| Order total = Σ(unit price × quantity) | Correct money math |
+| Overdue spec checks Submitted + 7-day threshold, SQL-translatable | Queryable business rule |
+| IDs use `RequiredGuid` with `Guid.CreateVersion7()` | Sortable, index-friendly identifiers |
+| `Customer.PhoneNumber` is `Maybe<PhoneNumber>` (nullable column) | Optionality is explicit |
+| Draft-order product load is **batched** (`FindManyByIdAsync`), not N+1 | One query, not one per line; and **not** parallelized on a shared `DbContext` (cookbook Recipe 21 — it races EF Core's change tracker) |
+| Cancel checks `actor == owner` **or** admin | Resource-based authorization |
+| Handlers/repositories never call `SaveChanges*` | Under `AddTrellisUnitOfWork<TContext>` the pipeline commits exactly once |
+
+### Level 3 — Architecture & API (13) · *Is the outside correct?*
+
+| Property | Why it matters |
+|---|---|
+| Four Clean-Architecture projects, dependencies inward | The dependency rule holds |
+| Domain references only Trellis + the runtime | Domain purity |
+| Mediator pipeline behaviors registered | Validation/auth/UoW apply uniformly |
+| `IActorProvider` registered (reads `X-Test-Actor`) | Testable identity |
+| One DI extension per layer, wired in `Program.cs` | Clear composition root |
+| All 14 endpoints present with correct verbs/paths | API matches the spec |
+| Namespace-based API versioning | Versions are isolated by folder |
+| RFC 9457 Problem Details for errors | Standard error shape |
+| 201 + Location on creation | Correct REST semantics |
+| `/health` endpoint present | Operability |
+| DTOs in the versioned `Models/` folder, not domain types | Presentation/domain separation |
+| `IEntityTypeConfiguration` classes in the ACL | Mapping lives with infrastructure |
+| `EnsureCreated()` in development, no migrations | Simple local startup |
+
+### Level 4 — Tests (9) · *Is it proven?*
+
+Domain tests per aggregate; happy-path and error-path tests; every valid **and** invalid state transition; the overdue specification; authorization (permission-denied + ownership); `Maybe` assertions (`.Should().HaveValue()` / `.Should().BeNone()`); API round-trips (routing, versioning, status codes, 403); and `Trellis.Testing` (`.Should().BeSuccess()` / `.BeFailure()`) used throughout. *Why:* the tests are how you (and the eval) know the behavior above actually holds.
+
+### Level 5 — Feedback (4) · *Did the build improve the framework?*
+
+`TRELLIS_FEEDBACK.md` exists; friction points are specific (category, severity, context, workaround, suggestion); a "What Worked Well" section is present; and the AI flags any ambiguity in the copilot instructions. *Why:* the lab is a feedback loop — friction surfaced here is how Trellis gets tighter.
+
+---
+
+## Running this as a consistency eval *(optional)*
+
+Everything above teaches one person to build one service. The same lab, run **many times across models**, measures something else: **how consistently Trellis steers different AIs to the same design.** If you only want to learn Trellis, you can stop here.
+
+> **What you're measuring:** not whether an AI can write code, but whether **Trellis constrains it enough** that independent runs produce the same architecture, patterns, and error handling. Where runs diverge, Trellis needs a tighter building block. (Reference baselines for the current cohort live in the repo [README](../README.md) and the full scorecards in [`results/evaluation-results.md`](../results/evaluation-results.md).)
+
+**Procedure:** run Steps 1–8 identically in N fresh sessions (new repo + new Copilot conversation each time). Use the same Step 4 prompt verbatim; don't fix the AI's mistakes — score them. After each run, mark every criterion in [What "good" looks like](#what-good-looks-like-and-why) Pass/Fail.
+
+**Scoring:** a criterion *counts* for a model if it passes. Sum per level for a total out of 57; **52+/57 passes**. For cross-run consistency, track how many of N runs pass each criterion and treat anything below ~70% as a framework/instruction gap to close.
+
+**Scriptable structural checks** (run from the service root):
 
 ```bash
-git add -A
-git commit -m "Add Order Returns feature"
+grep -rnw "catch" Domain/src Application/src --include="*.cs" | wc -l ;                  # 0 — no exception handling on the happy path
+grep -rn "Guid " Domain/src --include="*.cs" | grep -vE "RequiredGuid|ValidateAdditional" | wc -l ;  # 0 — generated VO validation hooks excluded
+grep -r "HasConversion" Acl/src --include="*.cs" | wc -l ;                               # 0 — conventions, not manual converters
+grep -r "ApplyTrellisConventions" Acl/src --include="*.cs" | wc -l ;                     # 1
+grep -r "ICommand<Result" Application/src --include="*.cs" | wc -l ;                     # 11 — one per command
+grep -rE "\[Http" Api/src --include="*.cs" | wc -l ;                                     # 16 — 14 spec endpoints + 2 hidden GET-by-id helper routes
+grep -rn "SaveChanges" Application/src Acl/src --include="*.cs" | wc -l ;                # only XML-doc mentions; zero actual calls (the UoW behavior commits)
 ```
+
+### Supplementary: feature-addition (Step 8)
+
+Score these separately from the core 57 — they measure whether the AI can **evolve** the codebase, not just create it.
+
+- **Zero regressions** — every pre-existing test still passes.
+- `Returned` added to `OrderStatus`; state machine gains `Delivered → Returned` only.
+- `ReturnReason` value object with `TryCreate` (10–500 chars).
+- `DeliveredAt` / `ReturnedAt` are `Maybe<DateTime>`, set on the right transitions.
+- 30-day window enforced and **testable** (injectable clock).
+- Stock released on return (reusing the cancel pattern).
+- `OrderReturnedEvent` raised; `orders:return` permission added; `ReturnOrderCommand` wired through the full pipeline.
+- `POST /api/orders/{id}/return` with correct versioning and status codes; domain + API tests added.
 
 ---
 
-## Congratulations
+## Trellis packages exercised
 
-You've built a complete enterprise service and evolved it with a new feature. Your codebase demonstrates:
-
-- Clean architecture (Domain, Application, Acl, API)
-- CQRS with Mediator and pipeline behaviors
-- Railway-Oriented Programming (no exceptions, typed errors)
-- Domain-Driven Design (aggregates, value objects, entities, specifications)
-- Permission-based and resource-based authorization
-- State machine with safe transitions — and safe modification
-- EF Core with convention-based value converters (zero HasConversion boilerplate)
-- Maybe\<T\> for optional values (no nulls in domain model)
-- API versioning and Service Level Indicators
-- Health checks
-- OpenTelemetry with Aspire Dashboard (traces, metrics, structured logs)
-- Comprehensive domain, application, and API integration tests
-- **Incremental feature addition without regressions**
+| Package | How this lab exercises it |
+|---------|--------------------------|
+| `Trellis.Core` | `Result<T>` on every operation, `Maybe<T>` for optionals, `Error` types, `Bind`/`Map`/`Tap`/`Ensure`/`Combine`; the DDD primitives (`Aggregate<TId>`, `Entity<TId>`, `Specification<T>`, `ValueObject`, `RequiredString<TSelf>`, `RequiredGuid<TSelf>`, …) and the source generators that emit `TryCreate`/equality/JSON converters. |
+| `Trellis.Primitives` | Ready-made value objects such as `EmailAddress`, `PhoneNumber`, `Money`. |
+| `Trellis.StateMachine` | The `Order` lifecycle via `LazyStateMachine` + `FireResult()`. |
+| `Trellis.Mediator` | Commands/queries plus `ValidationBehavior`, `AuthorizationBehavior`, and the Unit-of-Work behavior. |
+| `Trellis.Authorization` | `Actor`, `IActorProvider`, `IAuthorize`, `IAuthorizeResource`, `IIdentifyResource`. |
+| `Trellis.EntityFrameworkCore` | `ApplyTrellisConventions`, `AddTrellisUnitOfWork<T>`, `FirstOrDefaultMaybeAsync`, `.Where(spec)`. |
+| `Trellis.Asp` | Result-to-HTTP mapping, 201+Location, Problem Details, scalar value binding, actor providers. |
+| `Trellis.Analyzers` | Compile-time `Result`/`Maybe`/EF-Core correctness checks. |
+| `Trellis.Testing` | `.Should().BeSuccess()`/`.BeFailure()`/`.HaveValue()`/`.BeNone()`, `FakeRepository`, builders. |
 
 ---
 
-# Running This as an Eval
-
-To use this guide as a consistency eval for Trellis:
-
-1. **Start 10 fresh sessions** — new repo, new Copilot conversation each time.
-2. **Follow Steps 1–7 identically** in each session.
-3. **After each session,** score the output against the Evaluation Criteria below.
-4. **Record scores** in the tracking table.
-5. **Identify lowest-scoring criteria** — these are gaps in Trellis or the Copilot Instructions.
-6. **Improve Trellis or the instructions** to address the gaps.
-7. **Run again** — scores should improve.
-8. **Aggregate TRELLIS_FEEDBACK.md** across all 10 runs — recurring friction points are the highest-priority gaps.
-
-### Tips for Consistent Eval Runs
-
-- Use the same prompt in Step 4 exactly. Don't rephrase.
-- Don't fix Copilot's mistakes during the eval — note them and score them.
-- If Copilot asks a clarifying question, answer with "Follow the spec and Copilot instructions."
-- Time each run. Consistent runs should take roughly the same amount of time.
-- Save the generated code from each run for comparison.
-
-### What You're Measuring
-
-You're not measuring whether the AI can write code. You're measuring whether **Trellis constrains the AI enough** that 10 different runs produce the same architecture, the same patterns, and the same error handling. Where they diverge, Trellis needs a tighter building block.
-
----
-
-## Evaluation Criteria
-
-> **Template baseline:** The `dotnet new trellis-asp` template pre-provides project structure, build system files, and test infrastructure. Level 1 structural criteria marked with **(T)** are satisfied by the template. They measure whether the AI *preserved* the template structure — a failure means the AI broke or replaced something that was already correct.
-
-### Level 1: Structural Consistency (Pass/Fail)
-
-These must be identical across all 10 runs. If any vary, it indicates a missing building block in Trellis.
-
-| Criterion | What to Compare | Target |
-|-----------|----------------|--------|
-| **Value objects exist** | CustomerId, OrderId, ProductId, LineItemId, Sku, Money, ShippingAddress, FirstName, LastName, ProductName, Quantity are present as distinct types | 10/10 identical |
-| **Value objects use TryCreate** | All value objects use static TryCreate returning Result\<T\> | 10/10 identical |
-| **Aggregates inherit correctly** | Customer, Product, Order extend Aggregate\<TId\> | 10/10 identical |
-| **Line items are entities** | LineItem extends Entity\<LineItemId\> | 10/10 identical |
-| **State machine uses Stateless** | Order status transitions configured via Stateless with FireResult | 10/10 identical |
-| **State transitions return Result** | Fire operations return Result\<Order\>, not void/throw | 10/10 identical |
-| **Domain events defined** | All 5 events from spec exist as classes/records | 10/10 identical |
-| **Specification exists** | OverdueOrderSpec implements Specification\<Order\> | 10/10 identical |
-| **CQRS pattern used** | All operations are Commands/Queries with Handlers using Mediator | 10/10 identical |
-| **Authorization on commands** | Commands implement IAuthorize with RequiredPermissions. CancelOrderCommand implements IAuthorizeResource | 10/10 identical |
-| **Permissions as constants** | Permission strings defined as constants in Domain layer Permissions class | 10/10 identical |
-| **Repository interfaces in Application** | ICustomerRepository, IProductRepository, IOrderRepository in Application, not Domain | 10/10 identical |
-| **EF Core in Acl** **(T)** | DbContext and repository implementations in Acl, not Application or Domain | 10/10 identical |
-| **ApplyTrellisConventions used** **(T)** | ConfigureConventions calls ApplyTrellisConventions — no manual HasConversion() | 10/10 identical |
-| **Project structure matches template** **(T)** | Folder structure follows the project layout in copilot instructions | 10/10 identical |
-| **No exceptions for control flow** | grep for try/catch in Domain and Application layers returns zero hits | 10/10 identical |
-| **build/test.props shared** **(T)** | `build/test.props` exists. No `GlobalUsings.cs` in test projects. | 10/10 identical |
-| **No primitive obsession** | grep for raw Guid, raw string parameters in domain methods returns zero hits | 10/10 identical |
-
-### Level 2: Behavioral Consistency (Scored)
-
-These should be highly consistent. Minor naming variations acceptable; logic must be equivalent.
-
-| Criterion | What to Compare | Scoring |
-|-----------|----------------|---------|
-| **Submit validates stock** | Submit transition checks stock availability before reserving | 10 = all correct, <7 = needs pattern |
-| **Cancel releases stock** | Cancel from Submitted/Approved restores stock, Cancel from Draft does not | 10 = all correct, <7 = needs pattern |
-| **Line item price snapshot** | UnitPrice captured from product at creation, not referenced live | 10 = all correct, <7 = needs pattern |
-| **Duplicate product in order** | Adding same product to order is rejected | 10 = all handle it, <7 = spec ambiguity |
-| **Last line item protection** | Cannot remove last line item from order | 10 = all enforce, <7 = needs pattern |
-| **Error types match** | ValidationError, NotFoundError, ConflictError, ForbiddenError used correctly per spec | 10 = all match, <7 = error taxonomy issue |
-| **Order total computed** | Order total calculated as sum of (quantity × unitPrice) | 10 = all compute, <7 = needs guidance |
-| **Overdue spec correct** | Spec checks Submitted status + 7-day threshold, translatable to SQL | 10 = all correct, <7 = spec clarity |
-| **IDs use RequiredGuid with V7** | All identity types use RequiredGuid with Guid.CreateVersion7() | 10 = all correct, <7 = needs guidance |
-| **Maybe for optional phone** | Customer.PhoneNumber is Maybe\<PhoneNumber\>, stored as nullable column | 10 = all correct, <7 = needs pattern |
-| **Batched product load on draft order** | `CreateDraftOrder` fetches the product set in **one batched call** (e.g. `IProductRepository.FindManyByIdAsync`), not N sequential per-product fetches. Customer + product loads remain sequential on a single scoped `DbContext` (cookbook Recipe 21 forbids parallelizing two repos sharing one EF Core context — it races the change tracker). | 10 = single batched load, <7 = N+1 per-product fetches |
-| **Cancel resource auth check** | CancelOrderCommand checks actor == owner OR admin | 10 = all correct, <7 = needs pattern |
-| **Unit-of-work commits, handlers don't SaveChanges** | Under `AddTrellisUnitOfWork<TContext>` the pipeline commits exactly once at the end of the handler. Repositories stage changes (`Add`/`Remove`/mutate); they MUST NOT call `SaveChangesAsync` or `SaveChangesResultAsync` themselves. | 10 = zero `SaveChanges*` calls in handlers/repositories; <7 = one or more rogue commits |
-
-### Level 3: Architecture & API Consistency (Scored)
-
-| Criterion | What to Compare | Scoring |
-|-----------|----------------|---------|
-| **Clean architecture layers** | Four projects with correct dependency direction | 10 = all match, <7 = needs guidance |
-| **Domain has no external deps** | Domain .csproj references only Trellis packages and .NET runtime | 10 = all clean, <7 = dependency violation |
-| **Pipeline behaviors registered** | Mediator registered with pipeline behaviors from Trellis.Mediator | 10 = all correct, <7 = needs guidance |
-| **IActorProvider registered** | TestActorProvider registered, reads X-Test-Actor header | 10 = all correct, <7 = needs pattern |
-| **DI extension per layer** | Each layer has one DI extension method, wired in Program.cs | 10 = all match, <7 = template unclear |
-| **Endpoint paths match** | All 14 endpoints exist with correct HTTP methods and paths | 10 = exact match, <7 = spec needs detail |
-| **API versioning configured** | Asp.Versioning with namespace convention, versioned controller folders | 10 = all present, <7 = needs emphasis |
-| **Problem Details for errors** | Error responses follow RFC 9457 format | 10 = all use it, <7 = Trellis.Asp gap |
-| **201 for creation with Location** | POST /customers and POST /orders return 201 with Location header | 10 = all correct, <7 = needs pattern |
-| **Health check endpoint** | /health endpoint present | 10 = all present, <7 = needs emphasis |
-| **DTOs in Api layer** | Request/Response types in versioned Models/ folder (e.g., `Api/src/{version}/Models/`), not domain types | 10 = all correct, <7 = needs example |
-| **EF Core entity configurations** | IEntityTypeConfiguration classes in Acl | 10 = all correct, <7 = needs guidance |
-| **EnsureCreated on startup** | Database created via `EnsureCreated()` in development mode, no EF Core migrations | 10 = all correct, <7 = needs instruction |
-
-### Level 4: Test Consistency (Scored)
-
-| Criterion | What to Compare | Scoring |
-|-----------|----------------|---------|
-| **Domain tests exist** | Unit tests for each aggregate's business rules | 10 = all present, <7 = needs guidance |
-| **Happy path tests** | Each operation has at least one success test | 10 = all present |
-| **Error path tests** | Invalid transitions, validation failures, not found tested | 10 = all present, <7 = needs patterns |
-| **State machine tests** | Each valid and invalid transition tested | 10 = all present, <7 = needs helpers |
-| **Specification test** | OverdueOrderSpec tested | 10 = all present |
-| **Authorization tests** | Permission denied and resource auth tests present | 10 = all present, <7 = needs patterns |
-| **Maybe assertion tests** | Tests use `.Should().HaveValue()` / `.Should().BeNone()` for optional phone | 10 = all present, <7 = needs guidance |
-| **API integration tests** | Tests verify HTTP round-trips, routing, versioning, status codes, and 403 on missing permission | 10 = all present, <7 = needs guidance |
-| **Trellis.Testing used** | Tests use `.Should().BeSuccess()` / `.Should().BeFailure()` instead of manual inspection | 10 = all present, <7 = needs emphasis |
-
-### Level 5: Feedback Quality (Scored)
-
-| Criterion | What to Compare | Scoring |
-|-----------|----------------|---------|
-| **Feedback file exists** | TRELLIS_FEEDBACK.md generated in repository root | 10 = all present, <7 = instructions unclear |
-| **Friction points are specific** | Each FP has category, severity, context, workaround, and suggestion | 10 = all actionable, <7 = needs format guidance |
-| **What Worked Well present** | Positive feedback section exists with specific Trellis features listed | 10 = all present, <7 = needs emphasis |
-| **Copilot instructions feedback** | AI identifies ambiguities or gaps in the copilot instructions | 10 = all present, <7 = needs prompting |
-
-### Level 6: Feature Addition (Scored)
-
-> These criteria evaluate Step 8 — the Order Returns feature added to an existing codebase. They measure whether the AI can modify Trellis patterns without regressions.
-
-| Criterion | What to Compare | Scoring |
-|-----------|----------------|---------|
-| **Zero regressions** | All pre-existing tests still pass after feature addition | 10 = all pass, <7 = AI broke existing code |
-| **Returned status added** | `Returned` added to OrderStatus enum; state machine updated with `Delivered → Returned` transition | 10 = all correct, <7 = state machine gap |
-| **ReturnReason value object** | `ReturnReason` uses TryCreate with 10-500 char validation | 10 = all correct, <7 = VO pattern gap |
-| **DeliveredAt tracked** | `DeliveredAt` is `Maybe<DateTime>` on Order, set during Delivered transition | 10 = all correct, <7 = Maybe pattern gap |
-| **30-day return window** | Return validates `DeliveredAt` within 30 days; testable (injectable date or equivalent) | 10 = all correct, <7 = needs time pattern |
-| **Stock released on return** | Return releases reserved stock for each line item (same pattern as cancel) | 10 = all correct, <7 = pattern reuse gap |
-| **ReturnOrderCommand pipeline** | Command implements IAuthorize, permission `orders:return`, handler wired through Mediator | 10 = all correct, <7 = CQRS modification gap |
-| **API endpoint correct** | `POST /api/orders/{id}/return` with versioning, correct status codes | 10 = all correct, <7 = endpoint pattern gap |
-| **Domain event raised** | `OrderReturnedEvent` with OrderId, CustomerId, ReturnReason, ReturnedAt | 10 = all present, <7 = event pattern gap |
-| **Return tests exist** | Domain + API tests for valid return, expired window, invalid status | 10 = all present, <7 = test modification gap |
-
-## How to Score
-
-### Step 1: Build the Scorecard
-
-Create a table with one row per criterion and one column per run.
-
-```
-                              Run  1  2  3  4  5  6  7  8  9  10  Consistency
-L1: Value objects exist        [ ] [ ] [ ] [ ] [ ] [ ] [ ] [ ] [ ] [ ]  __/10
-L1: Value objects use TryCreate[ ] [ ] [ ] [ ] [ ] [ ] [ ] [ ] [ ] [ ]  __/10
-...
-```
-
-### Step 2: Score Each Cell
-
-For each criterion in each run, mark **Pass (✓)** or **Fail (✗)**.
-
-**How to check:**
-- **Structural criteria (L1):** Open the generated code and verify the type/pattern exists exactly as specified. Binary — it's there or it isn't.
-- **Behavioral criteria (L2):** Read the implementation logic. Does it do what the spec says? Minor naming differences are fine. The logic must be equivalent.
-- **Architecture & API criteria (L3):** Check project references, folder locations, endpoint routes, and configuration. Use `dotnet build` and manual inspection.
-- **Test criteria (L4):** Check that the test file exists and covers the described scenario. Run `dotnet test` to verify tests pass.
-
-**Quick checks you can script:**
-
-```bash
-# L1: No exceptions in domain/application
-grep -r "try\s*{" Domain/src/ Application/src/ | wc -l
-# Should be 0
-
-# L1: No raw Guid in domain methods
-grep -rn "Guid " Domain/src/ --include="*.cs" | grep -v "RequiredGuid" | wc -l
-# Should be 0
-
-# L1: No HasConversion in Acl
-grep -r "HasConversion" Acl/src/ --include="*.cs" | wc -l
-# Should be 0
-
-# L1: ApplyTrellisConventions present
-grep -r "ApplyTrellisConventions" Acl/src/ --include="*.cs" | wc -l
-# Should be 1
-
-# L1: CQRS commands/queries
-grep -r "ICommand<Result" Application/src/ --include="*.cs" | wc -l
-# Should be 11 (one per command)
-
-# L1: IAuthorize on commands
-grep -r "IAuthorize" Application/src/ --include="*.cs" | wc -l
-# Should be >= 11
-
-# L1: build/test.props exists
-test -f build/test.props && echo "EXISTS" || echo "MISSING"
-
-# L1: No GlobalUsings.cs in test projects
-find . -path "*/tests/GlobalUsings.cs" | wc -l
-# Should be 0
-
-# L3: Controller action count
-grep -rE "\[Http(Get|Post|Delete)\]" Api/src/ --include="*.cs" | wc -l
-# Should be 14
-
-# L3: EnsureCreated used (no migrations)
-grep -r "EnsureCreated" Api/src/ --include="*.cs" | wc -l
-# Should be >= 1
-
-# L4: Test count
-dotnet test --list-tests 2>/dev/null | grep "Test" | wc -l
-
-# L5: Feedback file exists
-test -f TRELLIS_FEEDBACK.md && echo "EXISTS" || echo "MISSING"
-
-# L6: Returned status exists
-grep -r "Returned" Domain/src/ --include="*.cs" | wc -l
-# Should be >= 1
-
-# L6: ReturnReason value object
-grep -rn "ReturnReason" Domain/src/ --include="*.cs" | wc -l
-# Should be >= 1
-
-# L6: Return endpoint exists
-grep -r "return" Api/src/ --include="*.cs" | grep -i "HttpPost\|return" | wc -l
-# Should be >= 1
-
-# L6: OrderReturnedEvent exists
-grep -r "OrderReturnedEvent" Domain/src/ --include="*.cs" | wc -l
-# Should be >= 1
-
-# L6: Zero regressions
-dotnet test 2>/dev/null | tail -5
-# Should show all tests passed
-```
-
-### Step 3: Calculate Consistency Per Criterion
-
-```
-Consistency = number of runs where this criterion passed (out of 10)
-```
-
-### Step 4: Calculate Level Scores
-
-A criterion **counts toward the level score** if its consistency is **7 or higher** (at least 7/10 runs got it right).
-
-```
-Level score = number of criteria in that level with consistency ≥ 7
-```
-
-| Level | Criteria Count | Score Range |
-|-------|---------------|-------------|
-| L1: Structural | 18 | 0–18 |
-| L2: Behavioral | 13 | 0–13 |
-| L3: Architecture & API | 12 | 0–12 |
-| L4: Tests | 9 | 0–9 |
-| L5: Feedback | 4 | 0–4 |
-| L6: Feature Addition | 10 | 0–10 |
-| **Total** | **66** | **0–66** |
-
-### Step 5: Record in Tracking Table
-
-| Date | Trellis Version | AI Model | L1 (/18) | L2 (/13) | L3 (/12) | L4 (/9) | L5 (/4) | L6 (/10) | Total (/66) | Notes |
-|------|----------------|----------|----------|---------|----------|---------|---------|----------|-------------|-------|
-| | | | | | | | | | | |
-
-### Step 6: Identify What to Fix
-
-Sort all criteria by consistency score, lowest first:
-
-| Consistency | Meaning | Action |
-|-------------|---------|--------|
-| **10/10** | Trellis fully constrains this. No work needed. | None |
-| **9/10** | Almost there. One outlier run. | Check if the outlier is a fluke or a real gap. |
-| **7–8/10** | Guidance exists but not enough constraint. | Add a stronger pattern, better example, or analyzer rule. |
-| **4–6/10** | Significant gap. AI has too many choices. | Add a new building block, convention, or constraint. |
-| **0–3/10** | Trellis doesn't address this at all. | Major addition needed. |
-
-### The Goal
-
-**Total score of 60+ out of 66** — meaning at least 60 of the 66 criteria achieve 7+/10 consistency across independent AI runs.
-
-The Level 6 criteria specifically measure whether the architecture and copilot instructions support **incremental change** — the most important real-world capability. A model that scores 56/56 on L1–L5 but can't modify the codebase without regressions isn't production-ready.
-
----
-
-## Trellis Packages Exercised
-
-| Package | How It's Exercised |
-|---------|--------------------|
-| `Trellis.Core` | `Result<T>` on every operation, `Maybe<T>` for optionals, error types, `Combine`, `Bind`, `Map`, `Tap`, `Match`, `MatchError`, `ParallelAsync`. Also ships the DDD primitives (`Aggregate<TId>`, `Entity<TId>`, `Specification<T>`, `ValueObject`, `ScalarValueObject<TSelf, T>`, `RequiredString<TSelf>`, `RequiredGuid<TSelf>`, etc.) and the source generators that emit `TryCreate` / equality / JSON converters for value objects. |
-| `Trellis.Primitives` | Ready-to-use concrete value objects: `EmailAddress`, `PhoneNumber`, `Money`, `MonetaryAmount`, `CurrencyCode`, `CountryCode`, `LanguageCode`, `Hostname`, `IpAddress`, `Url`, `Percentage`, `Slug`, `Age` — plus the JSON / tracing infrastructure that powers them. |
-| `Trellis.StateMachine` | `Order` state machine with `Result`-returning `FireResult()` extension over Stateless. |
-| `Trellis.Analyzers` | Compile-time `Result` / `Maybe` / EF Core correctness checks. |
-| `Trellis.Asp` | `ToHttpResponse(...)`, `CreatedAtRoute(...)` for 201+Location, Problem Details, scalar value binding, ASP.NET actor providers (Claims, Entra, Development). |
-| `Trellis.Authorization` | `Actor`, `IActorProvider`, `IAuthorize` (permissions), `IAuthorizeResource` (ownership), `IIdentifyResource`, `IAuthorizedResource<TMessage, TResource>` (v4 typed accessor). |
-| `Trellis.Mediator` | Commands, Queries, `ValidationBehavior`, `AuthorizationBehavior`, `ResourceAuthorizationBehavior`, `HideExistence<T>()`. |
-| `Trellis.EntityFrameworkCore` | `ApplyTrellisConventions`, `SaveChangesResultAsync`, `FirstOrDefaultMaybeAsync`, `.Where(spec)`. |
-| `Trellis.Testing` | `.Should().BeSuccess()`, `.Should().BeFailure()`, `.Should().BeFailureOfType<T>()`, `.Should().HaveValue()`, `.Should().BeNone()`, `FakeRepository`, `ResultBuilder`, `ValidationErrorBuilder`. |
-
-> **Note:** earlier versions of this guide listed `Trellis.Results`, `Trellis.Primitives.Generator`, `Trellis.DomainDrivenDesign`, and `Trellis.Stateless` as separate packages. Those names are obsolete on nuget.org. `Trellis.Results` / `Trellis.DomainDrivenDesign` / `Trellis.Primitives.Generator` were consolidated into [`Trellis.Core`](https://www.nuget.org/packages/Trellis.Core); `Trellis.Stateless` was renamed to [`Trellis.StateMachine`](https://www.nuget.org/packages/Trellis.StateMachine).
+## Where to go next
+
+- **Try another system shape.** The [Subscription Reminder Worker](training-lab-worker.md) lab teaches the non-HTTP `BackgroundService` shape (scheduled work, idempotency, actor composition). The [URL Shortener](training-lab-url-shortener.md) lab covers an unversioned redirect host with `Idempotency-Key` and ETags.
+- **Read the framework.** [`xavierjohn/Trellis`](https://github.com/xavierjohn/Trellis) is the source for every concept above.
+- **Study the reference build** any time: [`after/OrderManagement/`](../after/OrderManagement/).

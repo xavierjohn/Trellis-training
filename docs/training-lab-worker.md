@@ -1,277 +1,208 @@
-# Trellis Training Lab — Building a Background Worker with AI
+# Trellis Training Lab — Subscription Reminder Worker
 
-> **Purpose:** Measure how consistently AI builds a non-CRUD Trellis service — specifically a scheduled `BackgroundService` that calls external gateways, persists per-attempt idempotency state, and exposes a thin HTTP admin surface. Give the AI the spec + copilot instructions and let it implement the entire worker in one shot. Run it 10 times to measure consistency, the same way the [Order Management lab](training-lab.md) does for HTTP CRUD.
+> **Learn how Trellis shapes a *non-HTTP* service** — a scheduled `BackgroundService` that wakes on a timer, calls external gateways, classifies their failures, and records per-attempt idempotency state, with only a thin HTTP admin surface for inspection. It's the same framework you met in the OM lab, applied where there are no request/response cycles to hang the logic on.
+>
+> 🧪 Like every lab, it doubles as an [AI-consistency eval](#running-this-as-a-consistency-eval-optional). To learn, just follow the steps.
 
-This guide is the operator procedure. The binding sources are:
+> **Do the [Order Management lab](training-lab.md) first.** It teaches the fundamentals (`Result<T>`/ROP, `Maybe<T>`, value objects, Clean Architecture, CQRS, testing) this lab assumes. There's no reference build checked in for the worker — the [spec](../specs/subscription-reminder-worker.md) and [coverage checklist](../specs/coverage-checklist-subscription-reminder.md) are the source of truth, and you learn by reading what the AI builds against them.
 
-- [`specs/subscription-reminder-worker.md`](../specs/subscription-reminder-worker.md) — the spec.
-- [`specs/coverage-checklist-subscription-reminder.md`](../specs/coverage-checklist-subscription-reminder.md) — the test surface.
+---
 
-The eval scoring rubric is intentionally not in this repo yet. The first lab run is itself measurement — it surfaces which rubric rows matter, and an `evaluation-criteria-subscription-reminder.md` follows once that evidence exists.
+## Who this is for
+
+A developer who's done the OM lab and wants to see Trellis on a **scheduled, autonomous** shape — the kind of service that has no controller to anchor a trace, where correctness is observed in telemetry and database state rather than an HTTP response body.
+
+## What you'll build
+
+A worker that, on every tick, finds subscriptions due for a renewal reminder (by tier window), sends each via the right channel (email/SMS) through a gateway, classifies the result, and records exactly one attempt per `(subscription, tier, channel)` — idempotently, so a retry never double-sends. Two small admin endpoints (`/health`, `/admin/job-runs/{id}`) expose what happened. SQLite persistence; OpenTelemetry throughout.
+
+## What you'll learn
+
+- How to host a **`BackgroundService` tick loop** on Trellis and keep it **testable** with `TimeProvider` (never `DateTimeOffset.UtcNow`).
+- **Idempotency via a database unique constraint** on `(SubscriptionId, Tier, Channel)` — insert-then-catch, not read-then-decide — so concurrent or retried ticks never double-dispatch.
+- **Classifying external-gateway failures** as transient (retry next tick → `SoftFailed`) vs. permanent (data error → `HardFailed`) off Trellis's `Error` taxonomy, instead of inventing a parallel enum.
+- **Actor composition** — giving the worker a `SystemActor` **without leaking it into HTTP**, so the admin endpoints still enforce `job-runs:read`.
+- Driving **domain events outside an HTTP pipeline**, and verifying behavior through **observability** (traces, metrics, structured logs) plus a counter invariant rather than a `.http` script.
+
+---
+
+## Core concepts you'll meet *(new vs. the OM lab)*
+
+You already met `Result<T>`, value objects, Clean Architecture, CQRS, and testing in the [OM lab](training-lab.md#core-trellis-concepts-youll-meet). The worker shape adds:
+
+| Concept | What it is | Why it matters here |
+|---|---|---|
+| **Scheduled `BackgroundService`** | A hosted service whose tick interval comes from config (`Reminders:TickIntervalMinutes`); each tick is one `JobRun`. | There's no request to scope work to — the tick *is* the unit of work, and it must be observable and idempotent on its own. |
+| **`TimeProvider` everywhere** | All "is this due?" and "how old is this?" logic reads injected time. | A scheduler that reads `DateTimeOffset.UtcNow` is untestable; with `TimeProvider` you fast-forward a `FakeTimeProvider` and assert exact tick outcomes. |
+| **Idempotency by unique constraint** | A DB unique index on `(SubscriptionId, Tier, Channel)`; the dispatcher **inserts then catches** the violation. | A retried or concurrent tick must not send a second reminder. Read-then-decide races; the constraint is the source of truth. |
+| **Gateway error classification** | Map a gateway result to `SoftFailed` (transient, e.g. 5xx → retry next tick) or `HardFailed` (permanent, e.g. missing phone → never retry). | Lets the worker make progress on transient faults without hammering on permanent ones — and it should classify off Trellis `Error` types, not a hand-rolled `Transient`/`Permanent` enum. |
+| **Actor composition (no leak)** | One `IActorProvider` that yields a `SystemActor` for the worker but a real/HTTP actor for requests. | The classic footgun: registering the worker's `SystemActor` globally so the admin endpoints stop checking permissions. The auth-composition smoke check ([6c](#6c-prove-the-actor-doesnt-leak-into-http)) proves it didn't. |
+| **Counter invariant** | Every completed tick satisfies `dispatched + softFailed + hardFailed + skippedDuplicate + skippedInactive + skippedBudget == due`. | A single, cheap check that the dispatch loop accounted for every due subscription exactly once. |
+| **Observability-as-verification** | No `.http` script — you read Aspire traces/metrics/logs and the two admin endpoints. | For an autonomous service, telemetry *is* the interface; building it well is part of the job, not an afterthought. |
+
+<p align="center">
+  <img src="images/architecture-overview.png" alt="Clean Architecture — API, Anti-Corruption Layer, Application, Domain" width="640"/>
+</p>
+
+---
 
 ## Prerequisites
 
-Same as the [Order Management lab Prerequisites](training-lab.md#prerequisites). No additional tools.
+Same as the [OM lab](training-lab.md#prerequisites). The Aspire Dashboard (OM Step 2) is **not optional here** — it's your primary window into a service with no request/response to inspect.
 
----
+## The workflow
 
-## Step 1: Create a Project Directory
+The familiar 8 steps, with worker-specific twists: the smoke test (Step 6) is **observational**, and there's **no incremental-feature step** (this lab is single-shot — see [Differences from the OM lab](#differences-from-the-order-management-lab)).
 
-Create lab runs under `C:\GitHub\Trellis-lab-runs` using the same folder shape as the OM lab:
+<p align="center">
+  <img src="images/step-flow.png" alt="The 8-step lab workflow" width="760"/>
+</p>
 
-```text
-C:\GitHub\Trellis-lab-runs\<date>\run<#>\<model>\SubscriptionReminder
-```
-
-```bash
-mkdir C:\GitHub\Trellis-lab-runs\2026-06-01\run1\gpt-5.5\SubscriptionReminder
-cd C:\GitHub\Trellis-lab-runs\2026-06-01\run1\gpt-5.5\SubscriptionReminder
-git init
-```
-
----
-
-## Step 2: Start the Aspire Dashboard
-
-Identical to the OM lab — see [Step 2 of training-lab.md](training-lab.md#step-2-start-the-aspire-dashboard). Run the container once; both labs share the same dashboard.
-
----
-
-## Step 3: Scaffold and Acknowledge the Non-CRUD Shape
-
-Install the Trellis template (skip if already installed):
+## Step 1 — Create a project directory
 
 ```bash
-dotnet new install Trellis.AspTemplate
+mkdir SubscriptionReminder && cd SubscriptionReminder && git init
 ```
 
-Scaffold the project under the lab name `SubscriptionReminder`:
+## Step 2 — Start the Aspire Dashboard
+
+Identical to [OM Step 2](training-lab.md#step-2-start-the-aspire-dashboard) — run the container once; both labs share it. You'll lean on it heavily here.
+
+## Step 3 — Scaffold (and expect to reshape it)
 
 ```bash
+dotnet new install Trellis.AspTemplate        # first time only
 dotnet new trellis-asp -n SubscriptionReminder --authorName "Your Name"
+dotnet build && dotnet test                    # sample tests pass
+git add -A && git commit -m "Scaffold with Trellis template"
 ```
 
-This produces the same scaffold as the OM lab — an HTTP-shape service with the Todo sample, `.github/copilot-instructions.md`, and the per-package API references. Verify the baseline:
+> **The scaffold is HTTP-CRUD-shaped; the spec is intentionally not.** The template ships a Todo HTTP sample. The worker requires deleting most of it and re-shaping the host around a `BackgroundService`. How the AI re-shapes the scaffold is part of what you're learning to recognize — don't pre-guide it. Answer any clarifying question with *"Follow the spec and copilot instructions."*
 
-```bash
-dotnet build
-dotnet test
-```
+## Step 4 — Implement the service
 
-All template tests should pass.
+Open Copilot Chat and **attach two files** (paperclip — don't paste): [`specs/subscription-reminder-worker.md`](../specs/subscription-reminder-worker.md) as `SPEC.md` and [`specs/coverage-checklist-subscription-reminder.md`](../specs/coverage-checklist-subscription-reminder.md) as `COVERAGE.md`. Then send:
 
-> **The scaffold is HTTP CRUD-shaped; the spec is intentionally not.** The template starts you with a Todo HTTP sample. The worker spec requires deleting most of it and re-shaping the host. **Do not provide additional implementation guidance during eval runs** — whether and how the AI re-shapes the scaffold is part of what the lab measures. If Copilot asks a clarifying question, answer with: "Follow the spec and copilot instructions."
+> Implement the Subscription Renewal Reminder Worker according to the attached SPEC.md. Replace the sample Todo code — the spec is intentionally non-CRUD, so most of the template's HTTP sample should be deleted. Follow `.github/copilot-instructions.md` and `.github/trellis-api-*.md` exactly. Every row in §1–§10 of COVERAGE.md must have a matching test.
 
-Commit the bare scaffold:
+Let it work; then `dotnet build && dotnet test`, pasting back any errors until clean.
 
-```bash
-git add -A
-git commit -m "Scaffold with Trellis template"
-```
+## Step 5 — Configure a fast tick and a deterministic seed
 
----
+Two operator-side tweaks so the smoke test is *verifiable*:
 
-## Step 4: Implement the Service
-
-Open Copilot Chat. Attach **two files** from `Trellis-training/specs/` to the chat (paperclip icon — don't paste the bodies):
-
-1. `specs/subscription-reminder-worker.md` as `SPEC.md`
-2. `specs/coverage-checklist-subscription-reminder.md` as `COVERAGE.md`
-
-Then send this prompt verbatim:
-
-> Implement the Subscription Renewal Reminder Worker according to the attached SPEC.md. Replace the existing sample code (Todo) with the worker domain — the spec is intentionally non-CRUD, so most of the template's HTTP sample should be deleted. Follow `.github/copilot-instructions.md` and `.github/trellis-api-*.md` exactly. Every row in §1–§10 of COVERAGE.md must have a matching test — that file is the binding test surface, not a suggestion.
-
-**Let the AI work.** Do not intervene unless it asks a clarifying question. If it asks, answer with: "Follow the spec and copilot instructions."
-
-**When it finishes, verify the build:**
-
-```bash
-dotnet build
-dotnet test
-```
-
-If there are build or test errors, paste them back to Copilot and let it fix them. Repeat until clean.
-
----
-
-## Step 5: Configure Dev Smoke and a Deterministic Seed
-
-**Dev tick interval.** The spec defaults `Reminders:TickIntervalMinutes` to 30 minutes (production-correct). For interactive smoke, **merge** this property into the existing `appsettings.Development.json` (keep any other settings the template already wrote, e.g. `Logging`):
+**Fast dev tick.** The spec defaults `Reminders:TickIntervalMinutes` to 30 (production-correct). **Merge** a faster value into `appsettings.Development.json` (keep the template's other settings):
 
 ```json
-{
-  "Reminders": {
-    "TickIntervalMinutes": 0.5
-  }
-}
+{ "Reminders": { "TickIntervalMinutes": 0.5 } }
 ```
 
-This is the only operator-side configuration outside the spec. Production behaviour is unchanged.
+**Deterministic seed.** If the `DbSeeder` is random, you can't predict a tick's output. Confirm (or ask the AI to pin) a fixed seed covering at least these rows — each one teaches a branch of the dispatch logic:
 
-**Deterministic seed.** Smoke verification depends on knowing what each tick should produce. If the AI's `DbSeeder` is random, smoke is unverifiable. Before running Step 6, confirm the seeded data is fixed and covers at least these rows (ask the AI to add or pin them if missing):
+| # | Channel | Phone? | Tier window | Active? | Gateway outcome | Expected first-tick result |
+|---|---------|--------|-------------|---------|-----------------|----------------------------|
+| 1 | Email | n/a | within 7-day | yes | success | `Dispatched` |
+| 2 | Sms | yes | within 14-day | yes | success | `Dispatched` |
+| 3 | Sms | **no** | within 7-day | yes | n/a (skipped) | `HardFailed` (data error — no gateway call) |
+| 4 | Email | n/a | within 7-day | **no** | n/a | excluded by the due query |
+| 5 | Email | n/a | within 7-day | yes | transient (5xx) | `SoftFailed` (retried next tick) |
+| 6 | Email | n/a | 60 days out | yes | n/a | not due |
 
-| # | Channel | Phone? | Tier offset from now | Active? | Gateway-fake outcome | Expected first-tick result |
-|---|---------|--------|----------------------|---------|----------------------|----------------------------|
-| 1 | Email | n/a | within 7-day window | yes | success | `Dispatched` |
-| 2 | Sms | yes | within 14-day window | yes | success | `Dispatched` |
-| 3 | Sms | **no** | within 7-day window | yes | n/a (skipped) | `HardFailed` (data error — no gateway call) |
-| 4 | Email | n/a | within 7-day window | **no** | n/a | not in due query (silently excluded) |
-| 5 | Email | n/a | within 7-day window | yes | transient (5xx) | `SoftFailed` (retried on next tick) |
-| 6 | Email | n/a | 60 days out (outside any tier window) | yes | n/a | not due, not counted |
+Expected `/health.lastTickCounts` after tick 1: `due=4, dispatched=2, softFailed=1, hardFailed=1, skippedDuplicate=0, skippedInactive=0, skippedBudget=0`. (Rows 4 and 6 are excluded by the due query, so they never appear in `due`.) If the fake gateway can't inject per-subscription outcomes, that's itself a finding — the spec (§13.3) needs it for tests, and the same hook should serve smoke.
 
-Expected `/health.lastTickCounts` after the first tick: `due=4, dispatched=2, softFailed=1, hardFailed=1, skippedDuplicate=0, skippedInactive=0, skippedBudget=0`. The inactive row (#4) is excluded by the due query so it does not appear in `due`. The out-of-window row (#6) is also excluded.
+## Step 6 — Smoke test *(observational)*
 
-If the AI's fake gateway interface doesn't support per-subscription outcome injection, that itself is a finding — the spec's §13.3 requires it for integration tests, so the same hook should serve dev smoke.
+Run with telemetry pointed at the dashboard:
 
----
-
-## Step 6: Manual Smoke Test
-
-Start the application with telemetry pointed at the Aspire Dashboard:
-
-**PowerShell:**
 ```powershell
 $env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4317"
 $env:OTEL_EXPORTER_OTLP_PROTOCOL = "grpc"
 dotnet run --project Api/src
 ```
 
-**Bash:**
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 OTEL_EXPORTER_OTLP_PROTOCOL=grpc dotnet run --project Api/src
-```
+(Bash: `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 OTEL_EXPORTER_OTLP_PROTOCOL=grpc dotnet run --project Api/src`.) Open the dashboard at http://localhost:18888 and note the app port from the console. The worker is autonomous — there's nothing to "call"; you *watch* it.
 
-Open the **Aspire Dashboard** at http://localhost:18888 and note the application port from the console (e.g. `https://localhost:7234`).
+### 6a. Observability (within ~one tick)
+- [ ] Startup logs report the seeded subscription count — matches the table above.
+- [ ] A **"tick completed"** Information log per tick, carrying `JobRunId`, per-category counters, and `durationMs`.
+- [ ] **Metrics** tab: `reminders.dispatched.total{channel=email}` increments; `reminders.tick.duration` records per tick.
+- [ ] **Traces** tab: one trace per tick spanning the dispatch loop.
 
-The worker is autonomous — there is no `.http` script to drive it. Verification is observational. The two HTTP endpoints exist for inspection, not for triggering work.
+### 6b. Scenarios (after the first completed tick)
+Find the latest `JobRunId` (Aspire Logs filtered on `JobRun`, the console, or `SELECT Id FROM JobRuns ORDER BY StartedAt DESC LIMIT 1` in `Reminders.db`). Then:
+- [ ] `GET /health` → `200` with `lastTickCounts` matching `due=4, dispatched=2, softFailed=1, hardFailed=1`.
+- [ ] **Counter invariant** holds: `dispatched + softFailed + hardFailed + skipped* == due`.
+- [ ] `GET /admin/job-runs/{id}?api-version=1.0` with `X-Test-Actor: {"Id":"admin","Permissions":["job-runs:read"]}` → `200` with the job-run shape.
+- [ ] In `DispatchAttempts`: the no-phone SMS row is `HardFailed`; the transient row is `SoftFailed`.
+- [ ] **Second tick:** the transient row flips `SoftFailed → Dispatched` on the *same* attempt row — **not** a new row (proves the `(SubscriptionId, Tier, Channel)` constraint held — idempotency).
 
-### 6a. Observability checks (within roughly one tick interval)
+### 6c. Prove the actor doesn't leak into HTTP
+Hit the admin endpoint twice — this is the check that the worker's `SystemActor` isn't leaking into HTTP (§10):
 
-- [ ] Startup logs report how many subscriptions the seeder inserted. Number matches the seed table in Step 5.
-- [ ] At least one **"tick completed"** Information log appears per observed tick, carrying `JobRunId`, per-category counters, and `durationMs`. (Exact-one-per-tick is verified by the coverage checklist, not by manual smoke — Aspire log delivery is not instantaneous.)
-- [ ] Aspire **Metrics** tab shows `reminders.dispatched.total{channel=email}` incrementing.
-- [ ] Aspire **Metrics** tab shows `reminders.tick.duration` recording a value per tick.
-- [ ] Aspire **Traces** tab shows one trace per tick spanning the dispatch loop.
+| Request | `X-Test-Actor` | Expected |
+|---|---|---|
+| A | `{"Id":"admin","Permissions":["job-runs:read"]}` | `200` |
+| B | `{"Id":"noone","Permissions":["unrelated:perm"]}` | **`403`** (or `401`) — not `200` |
 
-### 6b. Scenario checks (after the first completed tick)
-
-Find the latest `JobRunId` from one of these sources (in order of preference):
-
-1. **Aspire Logs** tab — filter on `JobRun` and copy `JobRunId` from the structured "tick completed" entry.
-2. **Console output** of `dotnet run` — the same structured log appears here.
-3. **SQLite query** as a fallback: open `Reminders.db` and run `SELECT Id FROM JobRuns ORDER BY StartedAt DESC LIMIT 1`.
-
-Then verify:
-
-- [ ] `GET http://localhost:<port>/health` returns 200 with the §8 shape. `lastTickCounts` matches the expected counts from Step 5's seed table (`due=4, dispatched=2, softFailed=1, hardFailed=1`).
-- [ ] **Counter invariant:** `dispatched + softFailed + hardFailed + skippedDuplicate + skippedInactive + skippedBudget == due` on every completed tick.
-- [ ] `GET /admin/job-runs/{lastJobRunId}?api-version=1.0` with header `X-Test-Actor: {"Id":"admin","Permissions":["job-runs:read"]}` returns 200 with the §8 job-run shape (`id`, timestamps, `outcome`, `counts`, `failureSummary`).
-- [ ] For attempt-level smoke, query `DispatchAttempts` in `Reminders.db` and verify the no-phone SMS seed row is `HardFailed` with a data-error/no-phone reason and the transient-fake seed row is `SoftFailed`.
-- [ ] **Second tick** (wait another 30 seconds): `reminders.dispatched.total{channel=email}` increments by 1 (the transient row succeeds on retry) and a second `JobRun` row exists. Query `DispatchAttempts` in `Reminders.db` and verify the same `(SubscriptionId, Tier, Channel)` row moved from `SoftFailed` to `Dispatched` — **not** a new attempt row inserted (verifies §11 idempotency: the unique constraint on `(SubscriptionId, Tier, Channel)` held).
-
-### 6c. Auth composition check (proves §10)
-
-This is the critical check that the worker's `IActorProvider` isn't leaking `SystemActor` into HTTP. Send two requests to the same admin endpoint:
-
-| Request | `X-Test-Actor` header | Expected |
-|---------|------------------------|----------|
-| A | `{"Id":"admin","Permissions":["job-runs:read"]}` | 200 OK |
-| B | `{"Id":"noone","Permissions":["unrelated:perm"]}` | **403** (or 401) — **not 200** |
-
-If request B returns 200, the worker's actor provider is granting `SystemActor` (which has `job-runs:read`) to HTTP requests — §10 violation. Note the failure for evaluation but **do not fix it during eval runs**.
-
-If any check above fails, note it for evaluation but **do not fix it** during eval runs — it becomes your score.
+If B returns `200`, the actor provider is granting `SystemActor` (which has `job-runs:read`) to HTTP requests — a §10 violation.
 
 ### 6d. Troubleshooting
+If nothing happens after a full tick: confirm the `TickIntervalMinutes` override applied (log it on startup); confirm the seed inserted rows; confirm at least one `RenewsAt` falls in a tier window from "now" (±2h per §5); confirm the app appears in Aspire's **Resources** tab within ~10s; and check the `dotnet run` console for a tick exception that was logged-and-swallowed.
 
-If nothing happens after one full tick interval:
+## Step 7 — Review, then generate feedback
 
-- Confirm `appsettings.Development.json` actually applied the `Reminders:TickIntervalMinutes` override (log it on startup).
-- Confirm the seed actually inserted subscriptions (check `Reminders.db` directly or the startup log).
-- Confirm at least one seeded subscription's `RenewsAt` falls inside a tier window from "now" (with `±2 hour` tolerance per spec §5).
-- Confirm the Aspire OTLP endpoint resolves: in the **Resources** tab the app should appear within 10 seconds of startup.
-- Inspect the **console output** of `dotnet run` for unhandled exceptions in the worker tick — the worker may have logged-and-swallowed without surfacing to Aspire.
+Read the generated code against [What "good" looks like](#what-good-looks-like-and-why), commit, then have Copilot produce `TRELLIS_FEEDBACK.md` (same as [OM Step 7](training-lab.md#step-7-generate-trellis-feedback)). Keep the prompt **blind** — don't name friction areas; unprompted friction is the signal. The worker shape tends to surface friction around actor composition, gateway-error classification, and testing a `BackgroundService` without `WebApplicationFactory`.
 
----
-
-## Step 7: Review and Commit
-
-Review the generated code against the spec and the coverage checklist. Note divergences. **Do not fix them** during eval runs — they are your scores.
-
-Commit:
-
-```bash
-git add -A
-git commit -m "Implement Subscription Renewal Reminder Worker with Trellis"
-```
+> **No Step 8.** This lab is **single-shot** — there's no incremental-feature step, so it measures initial-build understanding only (not architecture evolution).
 
 ---
 
-## Step 8: Generate Trellis Feedback
+## What "good" looks like (and why)
 
-Ask Copilot to reflect on the development experience using the feedback format embedded in the scaffolded `.github/copilot-instructions.md` (same convention as the OM lab):
+Your definition of done. (As an eval these become scored rows; the binding matrix is the [coverage checklist](../specs/coverage-checklist-subscription-reminder.md).)
 
-> Review the entire codebase you just built — including any framework-feedback fixes I had you apply during this run. Generate `TRELLIS_FEEDBACK.md` at the repository root following the feedback format in `.github/copilot-instructions.md` exactly: section order, field order, category/severity enums, hard constraints, and the "what to exclude" clause all apply.
-
-The prompt is intentionally **blind** — it does not name friction areas, so the feedback file is independent observation, not prompted confirmation. Friction the AI surfaces unprompted is the measurement.
-
-**What to verify:**
-
-- [ ] `TRELLIS_FEEDBACK.md` exists in the repository root.
-- [ ] Each friction point has a category, severity, context, and suggested improvement.
-- [ ] Workaround code is included where applicable.
-- [ ] "What Worked Well" section is present and specific.
-- [ ] Copilot Instructions Feedback section addresses any ambiguities encountered.
-- [ ] Feedback is actionable — the Trellis team can read each entry and decide whether to act on it.
-
-```bash
-git add TRELLIS_FEEDBACK.md
-git commit -m "Add Trellis feedback"
-```
-
-### Post-feedback operator review (do not show this to the AI)
-
-After the feedback file is written, the **operator** scores it against the already-filed framework-improvement issues. Recurring friction in these areas across multiple runs corroborates the priority of the corresponding issue; novel friction outside these areas is the more valuable signal — it's a gap the current issue list doesn't capture.
-
-| Friction area to look for in `TRELLIS_FEEDBACK.md` | Tracking issue |
-|----------------------------------------------------|----------------|
-| Registering `BackgroundService` with the right `IActorProvider` composition (no `SystemActor` leaking into HTTP) | [xavierjohn/Trellis#529](https://github.com/xavierjohn/Trellis/issues/529) |
-| Classifying gateway errors as transient vs permanent without inventing parallel enums to Trellis's `Error` taxonomy | [xavierjohn/Trellis#530](https://github.com/xavierjohn/Trellis/issues/530) |
-| Building integration tests for `BackgroundService` without `WebApplicationFactory` (host + `FakeTimeProvider` + SQLite + actor + domain-event capture) | [xavierjohn/Trellis#531](https://github.com/xavierjohn/Trellis/issues/531) |
-| Handling unique-constraint conflicts on `(SubscriptionId, Tier, Channel)` as idempotency signals (insert-then-catch) rather than read-then-decide | [xavierjohn/Trellis#532](https://github.com/xavierjohn/Trellis/issues/532) |
+- **The tick is idempotent.** One attempt row per `(SubscriptionId, Tier, Channel)`, enforced by a DB unique constraint the dispatcher **inserts-then-catches**. *Why:* retries and overlapping ticks must never double-send.
+- **Time is injected.** No `DateTimeOffset.UtcNow` in production code — due-window and age logic read `TimeProvider`. *Why:* the whole service is time-driven and must be deterministically testable.
+- **Failures are classified, not invented.** Transient gateway faults → `SoftFailed` (retried); permanent/data faults → `HardFailed` (not retried) — derived from Trellis `Error` types, not a parallel enum. *Why:* progress on transient faults, no thrashing on permanent ones.
+- **The actor doesn't leak.** A single `IActorProvider` gives the worker a `SystemActor` while HTTP requests still resolve their own actor; `/admin/job-runs/{id}` enforces `job-runs:read`. *Why:* the dual-registration footgun silently disables admin authorization.
+- **Counters reconcile.** `dispatched + softFailed + hardFailed + skipped* == due` on every completed tick, and each tick emits exactly one structured "tick completed" log with `JobRunId` + counts + `durationMs`. *Why:* an autonomous service is only as trustworthy as its telemetry.
+- **Domain events flow through the pipeline**, not direct `DbContext` saves that bypass `DomainEventDispatchBehavior`.
+- **Tests** cover the dispatch outcomes (dispatched/soft/hard/skipped), the idempotency constraint against real SQLite, gateway-error classification, the counter invariant, and the actor-composition rule — built on a host + `FakeTimeProvider` + SQLite fixture (there's no `WebApplicationFactory` for a worker).
 
 ---
 
-## Differences from the Order Management Lab
+## Differences from the Order Management lab
 
-| Aspect | OM Lab | Worker Lab |
+| Aspect | OM lab | Worker lab |
 |--------|--------|------------|
-| Shape | HTTP CRUD service (16 endpoints) | Background worker + 2 admin endpoints |
-| Smoke driver | Scripted `.http` REST Client | Observational (Aspire Dashboard + 2 endpoints) |
-| Time control | Per request | Scheduled; Development overrides tick interval to 30s |
-| Seed data | Created via API calls | `DbSeeder` on startup — no creation endpoints exist (spec §14) |
-| Resource auth | `CancelOrderCommand` owner-or-admin | None — single `SystemActor`; `job-runs:read` on admin endpoint |
-| External I/O | None (pure in-process) | `IEmailGateway` / `ISmsGateway` — registered as in-process fakes for the lab (spec §7) |
-| Feature add (Step 8 equivalent) | Returns v2 delta (measures incremental-change consistency / L6) | None yet — single-shot lab. Worker scores are comparable to OM **only for initial-build consistency (L1–L5)**, not for incremental-change consistency (L6). |
+| Shape | HTTP CRUD (14 endpoints) | `BackgroundService` + 2 admin endpoints |
+| Smoke driver | Scripted `.http` | Observational (Aspire + 2 endpoints) |
+| Time control | Per request | Scheduled; dev overrides the tick to 30s |
+| Seed data | Created via API calls | `DbSeeder` on startup — no create endpoints exist |
+| Resource auth | `CancelOrderCommand` owner-or-admin | None — a `SystemActor`; `job-runs:read` on the admin endpoint |
+| External I/O | None | `IEmailGateway` / `ISmsGateway` (in-process fakes for the lab) |
+| Incremental feature (Step 8) | Order Returns (measures architecture evolution) | **None** — single-shot; comparable to OM only for initial-build understanding |
 
 ---
 
-# Running This as an Eval
+## Running this as a consistency eval *(optional)*
 
-The eval methodology is the same as the OM lab. See [Running This as an Eval](training-lab.md#running-this-as-an-eval) and [Tips for Consistent Eval Runs](training-lab.md#tips-for-consistent-eval-runs) — both apply verbatim.
+Same methodology as the [OM lab](training-lab.md#running-this-as-a-consistency-eval-optional). The point isn't whether an AI can write a worker — it's whether **Trellis constrains independent runs to the same non-CRUD architecture.** The most informative divergence axes (each maps to a real framework-improvement issue):
 
-The point of running this lab repeatedly is **not** to measure whether the AI can write a background worker. It is to measure whether **Trellis constrains the AI enough** that 10 different runs land on the same architecture for a non-CRUD shape. Where they diverge — particularly around the measurement axes in the next table — Trellis needs a tighter building block.
+| If runs diverge on… | …it tells us |
+|---|---|
+| One `IActorProvider` with HttpContext branching vs. the dual-registration leak | how urgently the framework needs a worker-actor-composition helper ([#529](https://github.com/xavierjohn/Trellis/issues/529)) |
+| Classifying off Trellis `Error` types vs. a parallel `Transient`/`Permanent` enum | whether the `Error` taxonomy needs clearer transient/permanent guidance ([#530](https://github.com/xavierjohn/Trellis/issues/530)) |
+| Hand-rolled `IHost`+`FakeTimeProvider`+SQLite fixture vs. a framework helper (none exists yet) | demand for a `BackgroundService` test harness ([#531](https://github.com/xavierjohn/Trellis/issues/531)) |
+| Insert-then-catch on the unique constraint vs. read-then-decide | whether idempotency-by-constraint needs a documented recipe ([#532](https://github.com/xavierjohn/Trellis/issues/532)) |
+| Saving via `DbContext` directly vs. through the domain-event pipeline | whether `DomainEventDispatchBehavior` needs better discoverability outside HTTP |
 
-## What You're Measuring
+Aggregated friction across runs (from each run's `TRELLIS_FEEDBACK.md`) becomes the prioritized framework backlog.
 
-| Measurement | What divergence here tells us |
-|-------------|-------------------------------|
-| Did the AI register a single `IActorProvider` with HttpContext branching, or did it ship the dual-registration footgun? | Confirms / weakens urgency of #529. |
-| Did the AI invent a parallel `Transient`/`Permanent` enum, or classify directly off Trellis `Error` types? | Confirms / weakens urgency of #530. |
-| Did the AI build its own `IHost`+`FakeTimeProvider`+SQLite test fixture, or reuse a framework helper? (Trick question — no framework helper exists today.) | Confirms / weakens urgency of #531. |
-| Did the AI `try/catch` a `DbUpdateException` to detect the unique-constraint violation, or read-then-decide? (The latter is wrong under concurrent ticks.) | Confirms / weakens urgency of #532. |
-| Did the worker bypass the domain-event pipeline by saving directly through `DbContext`? | Surfaces whether `DomainEventDispatchBehavior` needs better discoverability outside HTTP. |
-| Did the AI use `DateTimeOffset.UtcNow` anywhere in production code instead of `TimeProvider`? | Surfaces whether the copilot instructions emphasise time control strongly enough for non-HTTP code. |
+---
 
-Findings from each run flow back into `TRELLIS_FEEDBACK.md`. Aggregated friction across runs becomes the prioritised framework backlog.
+## Where to go next
+
+- The [URL Shortener](training-lab-url-shortener.md) lab — an unversioned HTTP redirect host.
+- The [Order Management](training-lab.md) lab — the canonical fundamentals.
+- The framework: [`xavierjohn/Trellis`](https://github.com/xavierjohn/Trellis).
