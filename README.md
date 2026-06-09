@@ -30,7 +30,7 @@ Pick a business spec, hand it to an AI (GitHub Copilot or any model you like), a
 
 Completing a lab shows you, in working code, how Trellis shapes:
 
-- **Clean Architecture** — `Domain → Application → Anti-Corruption Layer → API`, with dependencies pointing inward.
+- **Clean Architecture** — `API → Anti-Corruption Layer → Application → Domain`, with dependencies pointing inward.
 - **Railway-Oriented Programming** — `Result<T>` / `Maybe<T>` chains (`Bind` / `Map` / `Ensure`) with no try/catch on the happy path.
 - **Rich domain modeling** — value objects, `RequiredEnum<T>` smart enums, aggregates, entities, and specifications.
 - **State machines** — `LazyStateMachine` driving an order lifecycle with guarded transitions and stock side effects.

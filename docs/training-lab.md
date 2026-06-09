@@ -22,7 +22,7 @@ The **Order Management** service: customers, products with inventory, and orders
 
 By the end you'll understand, in working code, how Trellis shapes each of these — and *why*:
 
-- **Clean Architecture** with an enforced dependency rule (`Domain → Application → Anti-Corruption Layer → API`).
+- **Clean Architecture** with an enforced dependency rule (`API → Anti-Corruption Layer → Application → Domain`).
 - **Railway-Oriented Programming** — `Result<T>` / `Maybe<T>` instead of exceptions and nulls.
 - **Domain modeling without primitive obsession** — value objects, smart enums, aggregates, entities, specifications.
 - **A state machine** that makes illegal order transitions impossible.
@@ -157,7 +157,7 @@ dotnet test
 
 If there are build or test errors, paste them back and let Copilot fix them. Repeat until clean.
 
-> **What just happened?** The AI read the *business* requirements from the spec and the *implementation* conventions from `copilot-instructions.md`, then built the service layer by layer (`Domain → Application → Acl → Api → Tests`), compiling between layers because Trellis source generators emit code each build. You'll see the result in Step 6.
+> **What just happened?** The AI read the *business* requirements from the spec and the *implementation* conventions from `copilot-instructions.md`, then built the service layer by layer in build order (`Domain → Application → Acl → Api → Tests`), compiling between layers because Trellis source generators emit code each build. You'll see the result in Step 6.
 
 ## Step 5: Manual smoke test
 
