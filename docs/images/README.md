@@ -26,15 +26,18 @@ rather than sitting between Application and Domain.
 Regenerate with [`gen_architecture.py`](gen_architecture.py) (`python docs/images/gen_architecture.py`);
 source of truth is the `ProjectReference` graph under `after/OrderManagement`.
 
-### 3. `order-lifecycle.png` (600×350)
-**Used in:** README.md "What Gets Built" section
-**Concept:** State machine diagram for Order lifecycle:
+### 3. `order-lifecycle.png` (landscape, displayed at width 600)
+**Used in:** README.md header (above "What you're measuring")
+**Concept:** State machine diagram for the Order lifecycle (mirrors spec section 4 and
+`after/OrderManagement/Domain/src/Aggregates/Order.cs`):
 ```
 Draft → Submitted → Approved → Shipped → Delivered
   ↓         ↓           ↓
 Cancel   Cancel      Cancel
 ```
-Each state as a rounded rectangle with color coding (Draft=gray, Submitted=blue, Approved=green, Shipped=orange, Delivered=purple, Cancelled=red). Transitions as labeled arrows. Show "Reserve Stock" on Submit arrow, "Release Stock" on Cancel arrows.
+Each state as a rounded rectangle with color coding (Draft=gray, Submitted=blue, Approved=green, Shipped=orange, Delivered=purple, Cancelled=red). Transitions as labeled arrows. Show **"Reserve Stock" on the Submit arrow** and **"Release Stock" only on the Submitted→Cancelled and Approved→Cancelled arrows** — cancelling a Draft reserves nothing, so it releases nothing (spec 4: *"If order was Submitted or Approved, release reserved stock"*).
+
+Regenerate with [`gen_order_lifecycle.py`](gen_order_lifecycle.py) (`python docs/images/gen_order_lifecycle.py`).
 
 ### 4. `before-after.png` (700×400)
 **Used in:** README.md "Before & After" section
@@ -44,13 +47,16 @@ Each state as a rounded rectangle with color coding (Draft=gray, Submitted=blue,
 - Visual arrow or transform icon between them
 - Emphasize the transformation from boilerplate to real enterprise code
 
-### 5. `step-flow.png` (700×200)
-**Used in:** README.md "How It Works" section
-**Concept:** Horizontal flow diagram showing 8 steps:
+### 5. `step-flow.png` (landscape, displayed at width 700)
+**Used in:** README.md "How a lab works" section
+**Concept:** Horizontal flow diagram showing the 8 lab steps (wording follows the README
+8-step table):
 ```
-① Scaffold → ② Dashboard → ③ Template → ④ AI Implements → ⑤ Smoke Test → ⑥ Review → ⑦ Feedback → ⑧ Returns Feature
+① Create Project → ② Aspire Dashboard → ③ Scaffold → ④ AI Implements → ⑤ Smoke Test → ⑥ Review → ⑦ Feedback → ⑧ Add Feature
 ```
-Each step as a numbered circle or card connected by arrows. Steps 4 and 8 highlighted (these are the AI-driven steps). Clean, minimal design.
+Each step as a numbered circle inside a card, connected by arrows. Steps 4 and 8 are highlighted green (the AI-driven steps). Step 8 is intentionally lab-agnostic ("Add Feature") because the feature differs per lab (OM: Order Returns, worker: SLA policy override, URL shortener: bulk-import endpoint). Clean, minimal design.
+
+Regenerate with [`gen_step_flow.py`](gen_step_flow.py) (`python docs/images/gen_step_flow.py`).
 
 ### 6. `evaluation-radar.png` (landscape, displayed at width 500)
 **Used in:** README.md "Evaluation" section
