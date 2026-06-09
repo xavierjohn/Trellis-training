@@ -10,7 +10,7 @@ Each image below needs to be created and placed in this folder. The README.md re
 **Text overlay:** "Trellis Training Lab" + "AI-Powered Enterprise Service Development"
 
 ### 2. `architecture-overview.png` (landscape, displayed at width 700)
-**Used in:** README.md header (above the lab catalog)
+**Used in:** README.md "What is Trellis?" section
 **Concept:** The 4-layer clean architecture diagram, stacked outer → inner to match the
 actual `*.csproj` dependency graph in `after/OrderManagement`:
 - **API** (top, blue) — Controllers, DTOs, Middleware
@@ -27,7 +27,7 @@ Regenerate with [`gen_architecture.py`](gen_architecture.py) (`python docs/image
 source of truth is the `ProjectReference` graph under `after/OrderManagement`.
 
 ### 3. `order-lifecycle.png` (landscape, displayed at width 600)
-**Used in:** README.md header (above "What you're measuring")
+**Used in:** README.md "What you'll learn" section
 **Concept:** State machine diagram for the Order lifecycle (mirrors spec section 4 and
 `after/OrderManagement/Domain/src/Aggregates/Order.cs`):
 ```
@@ -40,7 +40,7 @@ Each state as a rounded rectangle with color coding (Draft=gray, Submitted=blue,
 Regenerate with [`gen_order_lifecycle.py`](gen_order_lifecycle.py) (`python docs/images/gen_order_lifecycle.py`).
 
 ### 4. `before-after.png` (700×400)
-**Used in:** README.md "Before & After" section
+**Used in:** README.md "Study the reference implementation" section
 **Concept:** Split-screen comparison:
 - **Left side** labeled "Before (Template)" — shows a simple project tree with sample WeatherForecast code, faded/gray tone
 - **Right side** labeled "After (AI-Generated)" — shows the full Order Management project tree with real domain types, vibrant/colorful tone
@@ -59,7 +59,7 @@ Each step as a numbered circle inside a card, connected by arrows. Steps 4 and 8
 Regenerate with [`gen_step_flow.py`](gen_step_flow.py) (`python docs/images/gen_step_flow.py`).
 
 ### 6. `evaluation-radar.png` (landscape, displayed at width 500)
-**Used in:** README.md "Evaluation" section
+**Used in:** README.md "Also a benchmark" section
 **Concept:** Radar/spider chart with 5 axes, each normalized so the outer ring is full marks:
 - L1: Structural (18 pts)
 - L2: Behavioral (13 pts)
@@ -92,7 +92,7 @@ Regenerate with [`gen_radar.py`](gen_radar.py) (`python docs/images/gen_radar.py
 **Note:** Best as an actual screenshot from `https://localhost:7011/scalar/2026-11-12` after running the service.
 
 ### 9. `rop-pipeline.png` (landscape, displayed at width 600)
-**Used in:** README.md "What you're measuring" section
+**Used in:** README.md "Study the reference implementation" section
 **Concept:** Railway-oriented programming visualization based on the OM `SubmitOrder` handler. Two parallel tracks (success on top, failure on the bottom):
 ```
 FindById → Submit → Commit (UoW) → 200 OK (Order → DTO)

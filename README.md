@@ -1,8 +1,8 @@
-﻿<p align="center">
-  <img src="docs/images/hero-banner.png" alt="Trellis Training Lab Corpus — AI-Powered Enterprise Service Development" width="800"/>
+<p align="center">
+  <img src="docs/images/hero-banner.png" alt="Trellis Training Lab — learn to build enterprise .NET services with AI" width="800"/>
 </p>
 
-# Trellis Training Lab Corpus
+# Trellis Training Lab
 
 [![Build](https://img.shields.io/badge/lab-corpus-blue.svg)](docs/training-lab.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -10,50 +10,73 @@
 [![C#](https://img.shields.io/badge/C%23-14.0-blue.svg)](https://docs.microsoft.com/en-us/dotnet/csharp/)
 [![GitHub Stars](https://img.shields.io/github/stars/xavierjohn/Trellis-training?style=social)](https://github.com/xavierjohn/Trellis-training/stargazers)
 
-> Build enterprise services with AI — and measure consistency across system shapes.
+> **Learn to build enterprise .NET services with the [Trellis](https://github.com/xavierjohn/Trellis) framework** — by having AI implement real specs end-to-end while you study idiomatic, production-shaped code.
 
-This repository is a **lab corpus**: a growing collection of business specs that the AI implements end-to-end against the [Trellis framework](https://github.com/xavierjohn/Trellis) + a template. Each lab targets a different system shape (HTTP CRUD, background worker, unversioned redirect host, …). Each run is scored against a per-lab coverage checklist.
+Pick a business spec, hand it to an AI (GitHub Copilot or any model you like), and watch it build a complete service on Trellis. Then **read it, run it, and review it** against a checklist. You walk away understanding how a real Trellis service is shaped — Clean Architecture layers, Railway-Oriented error handling, value objects, state machines, versioned APIs, and EF Core conventions — without staring at a blank page.
 
-The corpus is intentionally heterogeneous. **Single-lab benchmarks only tell you whether AI does *that one shape* consistently** — not whether Trellis is consistent across shapes. The corpus exists so framework feedback isn't biased toward whatever lab was written first.
-
-This isn't a tutorial — it's a **training lab + AI consistency benchmark**.
+> 🧪 **It doubles as a benchmark.** Because every lab is scored against the same rubric, running it across different AI models also measures how consistently Trellis steers them. That's a handy side effect — see [Also a benchmark](#also-a-benchmark-measuring-ai-consistency) — but if you're here to **learn Trellis, jump straight to [Quick Start](#quick-start).**
 
 ---
 
+## What is Trellis?
+
+[Trellis](https://github.com/xavierjohn/Trellis) is a .NET framework for building enterprise services with strong domain modeling and explicit error handling. Instead of throwing exceptions for expected failures, you compose `Result<T>` and `Maybe<T>` pipelines (Railway-Oriented Programming). Instead of passing raw `Guid` / `string` / `int` around, you model domain concepts as value objects (`RequiredGuid<T>`, `RequiredString<T>`, `RequiredEnum<T>`, …). On top of that it ships DDD building blocks — aggregates, entities, specifications, state machines — plus first-class ASP.NET Core, EF Core, and Mediator integration. **These labs teach those building blocks by example.**
+
 <p align="center">
-  <img src="docs/images/architecture-overview.png" alt="Clean Architecture — Domain, Application, Anti-Corruption Layer, API" width="700"/>
+  <img src="docs/images/architecture-overview.png" alt="Clean Architecture — API, Anti-Corruption Layer, Application, Domain" width="700"/>
 </p>
 
-## Lab catalog
+## What you'll learn
 
-| Lab | System shape | Spec | Checklist | Operator guide |
-|---|---|---|---|---|
-| **Order Management** | CRUD + state machine + versioned API + EF Core | [`specs/order-management.md`](specs/order-management.md) | embedded in operator guide | [`docs/training-lab.md`](docs/training-lab.md) |
-| **Subscription Reminder Worker** | `BackgroundService` + scheduled work + non-HTTP pipeline + cross-pipeline actor composition | [`specs/subscription-reminder-worker.md`](specs/subscription-reminder-worker.md) | [`specs/coverage-checklist-subscription-reminder.md`](specs/coverage-checklist-subscription-reminder.md) | [`docs/training-lab-worker.md`](docs/training-lab-worker.md) |
-| **URL Shortener** | Unversioned HTTP surface + write-then-redirect + `Idempotency-Key` + ETag + anonymous redirect alongside permission-gated CRUD | [`specs/url-shortener.md`](specs/url-shortener.md) | [`specs/coverage-checklist-url-shortener.md`](specs/coverage-checklist-url-shortener.md) | (TBD — open issue) |
+Completing a lab shows you, in working code, how Trellis shapes:
 
-Each lab exercises a distinct slice of the Trellis surface area. Framework friction surfaced by one lab feeds the per-lab `TRELLIS_FEEDBACK.md`; recurring friction across labs becomes the prioritised framework backlog.
+- **Clean Architecture** — `Domain → Application → Anti-Corruption Layer → API`, with dependencies pointing inward.
+- **Railway-Oriented Programming** — `Result<T>` / `Maybe<T>` chains (`Bind` / `Map` / `Ensure`) with no try/catch on the happy path.
+- **Rich domain modeling** — value objects, `RequiredEnum<T>` smart enums, aggregates, entities, and specifications.
+- **State machines** — `LazyStateMachine` driving an order lifecycle with guarded transitions and stock side effects.
+- **Versioned HTTP APIs** — namespace-based API versioning, RFC 9457 ProblemDetails, ETags / `If-Match`.
+- **EF Core, the Trellis way** — conventions, interceptors, and Unit-of-Work commits (handlers never call `SaveChanges`).
+- **Authorization & testing** — actor-based authorization and the `Trellis.Testing` assertion helpers.
 
 <p align="center">
   <img src="docs/images/order-lifecycle.png" alt="Order State Machine — Draft through Delivered with Cancel transitions" width="600"/>
 </p>
 
-## What you're measuring
+## Prerequisites
 
-You're **not** measuring whether AI can write code. You're measuring whether **Trellis constrains the AI enough** that independent runs produce the same architecture, the same patterns, and the same error handling — across labs that exercise different framework surfaces.
+- .NET 10 SDK
+- VS Code or Visual Studio
+- GitHub Copilot (Copilot Chat in VS Code) — or another AI model you want to drive the build
+- The Trellis ASP template: `dotnet new install Trellis.AspTemplate`
+- Docker Desktop *(optional — for the Aspire Dashboard)*
+- The Trellis Microservices template *(optional — for future multi-service labs)*: `dotnet new install Trellis.Microservices.Templates`
 
-Where independent runs diverge, Trellis needs a tighter building block. Where divergence is consistent across labs, the framework has a structural gap. Where divergence appears in only one lab, it's a lab-specific edge case (or a lab-specific spec ambiguity).
+## Quick Start
 
-<p align="center">
-  <img src="docs/images/rop-pipeline.png" alt="Railway-Oriented Programming — Result chains flowing through handlers" width="600"/>
-</p>
+```bash
+# 1. Clone this repo
+git clone https://github.com/xavierjohn/Trellis-training.git
+
+# 2. Install the Trellis template
+dotnet new install Trellis.AspTemplate
+
+# 3. Open the operator guide for the lab you want to learn:
+#    - HTTP CRUD + state machine:  docs/training-lab.md          (Order Management — start here)
+#    - Background worker:          docs/training-lab-worker.md    (Subscription Reminder)
+
+# 4. Follow Steps 1-8 in that guide. The implementation itself (Step 4) happens
+#    by pasting the lab spec + checklist into GitHub Copilot — the AI writes the
+#    code; you read, run, and review it against the checklist.
+```
+
+New here? **Start with the Order Management lab ([`docs/training-lab.md`](docs/training-lab.md))** — it's the canonical, fully-documented walkthrough. Prefer to just *read* finished code first? Jump to [Study the reference implementation](#study-the-reference-implementation).
 
 ## How a lab works
 
-Each lab follows the same 8-step procedure. The OM lab's `docs/training-lab.md` is the canonical reference; lab-specific operator guides (e.g. `docs/training-lab-worker.md`) add or override per-lab steps where the system shape requires it.
+Every lab follows the same 8-step procedure. The Order Management guide ([`docs/training-lab.md`](docs/training-lab.md)) is the canonical reference; per-lab guides add or override steps where the system shape requires it.
 
 <p align="center">
-  <img src="docs/images/step-flow.png" alt="8 Steps — Scaffold, Implement, Test, Smoke Test, Review, Feedback, Returns Feature" width="700"/>
+  <img src="docs/images/step-flow.png" alt="8 steps — Create Project, Aspire Dashboard, Scaffold, AI Implements, Smoke Test, Review, Feedback, Add Feature" width="700"/>
 </p>
 
 | Step | What happens | Time |
@@ -67,15 +90,60 @@ Each lab follows the same 8-step procedure. The OM lab's `docs/training-lab.md` 
 | **7** | AI generates `TRELLIS_FEEDBACK.md` | 2 min |
 | **8** | AI adds an incremental feature (OM: Order Returns; worker: SLA policy override; URL shortener: bulk-import endpoint) | 10-15 min |
 
-**Total: ~45 minutes per run.** The per-lab operator guide names the lab-specific Step 4 attachments, Step 5 smoke verification, and Step 8 feature addition.
+**Total: ~45 minutes per run.** Each operator guide names the lab-specific Step 4 attachments, Step 5 smoke verification, and Step 8 feature.
 
-## Evaluation
+## Lab catalog
 
-Each lab is scored against its own checklist. The OM lab uses the original 57-criteria rubric (`docs/training-lab.md`); the worker and URL-shortener labs use a shape-specific per-row checklist (`specs/coverage-checklist-*.md`).
+Each lab targets a different **system shape**, so you learn how Trellis handles a different kind of service. Start with Order Management, then branch out.
+
+| Lab | What you'll learn (system shape) | Spec | Operator guide |
+|---|---|---|---|
+| **Order Management** | CRUD + state machine + versioned API + EF Core | [`specs/order-management.md`](specs/order-management.md) | [`docs/training-lab.md`](docs/training-lab.md) |
+| **Subscription Reminder Worker** | `BackgroundService` + scheduled work + non-HTTP pipeline + cross-pipeline actor composition | [`specs/subscription-reminder-worker.md`](specs/subscription-reminder-worker.md) | [`docs/training-lab-worker.md`](docs/training-lab-worker.md) |
+| **URL Shortener** | Unversioned HTTP + write-then-redirect + `Idempotency-Key` + ETag + anonymous redirect alongside permission-gated CRUD | [`specs/url-shortener.md`](specs/url-shortener.md) | *operator guide TBD* |
+
+> Checklists live alongside the specs: the OM checklist is embedded in its operator guide; the worker and URL-shortener labs use the [`specs/coverage-checklist-*.md`](specs/) files.
+
+## Study the reference implementation
+
+Want to read idiomatic Trellis code without running anything? Two complete copies of the Order Management lab are checked in:
+
+- **[`before/OrderManagement/`](before/OrderManagement/)** — the template scaffold you start from (the sample `WeatherForecast` service).
+- **[`after/OrderManagement/`](after/OrderManagement/)** — a complete, passing reference implementation. Start in `Domain/src/` (value objects, aggregates, the order state machine) and follow the layers outward through `Application/src/`, `Acl/src/`, and `Api/src/`.
 
 <p align="center">
-  <img src="docs/images/evaluation-radar.png" alt="Evaluation Radar — L1 Structural, L2 Behavioral, L3 Architecture, L4 Tests, L5 Feedback" width="500"/>
+  <img src="docs/images/before-after.png" alt="Before and After — from template scaffold to a full Trellis service" width="700"/>
 </p>
+
+Trellis leans on Railway-Oriented Programming throughout: every handler threads a `Result<T>` so failures short-circuit without exceptions, and the commit is a framework pipeline stage rather than a `SaveChanges` call in the handler.
+
+<p align="center">
+  <img src="docs/images/rop-pipeline.png" alt="Railway-Oriented Programming — Result chains flowing through a handler" width="600"/>
+</p>
+
+## Observability
+
+Every lab includes Aspire Dashboard integration for real-time traces, metrics, and structured logs.
+
+<p align="center">
+  <img src="docs/images/aspire-dashboard.png" alt="Aspire Dashboard — distributed traces showing service calls" width="700"/>
+</p>
+
+The HTTP labs serve interactive API docs via Scalar:
+
+<p align="center">
+  <img src="docs/images/scalar-api-docs.png" alt="Scalar API documentation — interactive OpenAPI explorer" width="700"/>
+</p>
+
+## Also a benchmark: measuring AI consistency
+
+The training lab has a useful side effect. Because every lab is scored against the same per-lab checklist, running a spec across **different AI models** measures whether Trellis constrains them into the *same* architecture, patterns, and error handling.
+
+You're **not** measuring whether AI can write code — you're measuring whether **Trellis is a tight enough framework** that independent runs converge. Where runs diverge, Trellis needs a tighter building block; where divergence is consistent across labs, the framework has a structural gap. Keeping the corpus heterogeneous (HTTP CRUD, worker, redirect host, …) keeps that signal from being biased toward whatever lab was written first.
+
+### Scoring
+
+The OM lab uses a 57-criteria rubric across five levels:
 
 | Level | What it measures | OM rows |
 |-------|-----------------|---------|
@@ -85,9 +153,13 @@ Each lab is scored against its own checklist. The OM lab uses the original 57-cr
 | **L4: Tests** | Are domain, integration, and auth tests comprehensive? | 9 |
 | **L5: Feedback** | Did the AI produce useful framework feedback? | 4 |
 
-**Passing score (OM lab): 52+/57.** Per-lab thresholds are documented in each operator guide.
+**Passing score (OM lab): 52+/57.** Per-lab thresholds live in each operator guide.
 
-### Order Management baselines — Trellis `3.0.0-alpha.360` (2026-06-08, rescored after L2.11 rubric fix)
+<p align="center">
+  <img src="docs/images/evaluation-radar.png" alt="Evaluation radar — L1 Structural, L2 Behavioral, L3 Architecture, L4 Tests, L5 Feedback" width="500"/>
+</p>
+
+### Order Management baselines — Trellis `3.0.0-alpha.360`
 
 | AI Model | Score | Verdict |
 |----------|-------|---------|
@@ -97,52 +169,7 @@ Each lab is scored against its own checklist. The OM lab uses the original 57-cr
 | GPT-5.5 | 54/57 (95%) | **PASS** |
 | Claude Haiku 4.5 | 43/57 (75%) | **FAIL** |
 
-Top four cluster 54–56/57. The rubric's **L2.11** was rewritten in this PR — it previously asked for `ParallelAsync` on the draft-order load, which contradicted cookbook Recipe 21 (parallelizing two repos that share a scoped `DbContext` races EF Core). All five models had used the framework-correct batched load (`FindManyByIdAsync`), so the fix produced +1 each. **Opus 4.8** was the only model to flag the contradiction in its TRELLIS_FEEDBACK before the fix; **Sonnet 4.6** was the only model to use both `Trellis.Testing` assertion extensions (`.Should().BeSuccess()` AND `.Should().HaveValue()`) systematically. Reference run on disk: [`after/OrderManagement/`](after/OrderManagement/) (Opus 4.7 1M).
-
-**Historical (alpha.104/106) for diff reference only — kept in [results/evaluation-results.md](results/evaluation-results.md):** Opus 4.6 53/57 PASS · Sonnet 4.6 55/57 PASS · GPT-5.4 45/57 FAIL. Direct cross-era comparison isn't apples-to-apples because the v4 typed-accessor pattern, the `Trellis.Mediator.FluentValidation` package split, and the `Error.Conflict` reason-code requirement all changed underneath the rubric.
-
-Full per-model scorecards with criterion-by-criterion findings: **[results/evaluation-results.md](results/evaluation-results.md)**. Mistakes pattern log: **[results/ai-mistakes-log.md](results/ai-mistakes-log.md)**.
-
-## Observability
-
-Every lab includes Aspire Dashboard integration for real-time traces, metrics, and structured logs.
-
-<p align="center">
-  <img src="docs/images/aspire-dashboard.png" alt="Aspire Dashboard — Distributed traces showing service calls" width="700"/>
-</p>
-
-API documentation is served via Scalar for the HTTP labs:
-
-<p align="center">
-  <img src="docs/images/scalar-api-docs.png" alt="Scalar API Documentation — Interactive OpenAPI explorer" width="700"/>
-</p>
-
-## Prerequisites
-
-- GitHub Copilot access (Copilot Chat in VS Code) or another AI model you want to benchmark
-- .NET 10 SDK
-- VS Code or Visual Studio
-- Docker Desktop (optional — for Aspire Dashboard)
-- Trellis ASP template: `dotnet new install Trellis.AspTemplate`
-- Trellis Microservices template (for future multi-service labs): `dotnet new install Trellis.Microservices.Templates`
-
-## Quick Start
-
-```bash
-# 1. Clone this repo
-git clone https://github.com/xavierjohn/Trellis-training.git
-
-# 2. Install the templates
-dotnet new install Trellis.AspTemplate
-dotnet new install Trellis.Microservices.Templates
-
-# 3. Pick a lab
-#    - HTTP CRUD + state machine: docs/training-lab.md (Order Management)
-#    - Background worker:         docs/training-lab-worker.md (Subscription Reminder)
-#    - Unversioned HTTP redirect: specs/url-shortener.md (operator guide TBD)
-
-# 4. Follow the operator guide Steps 1-8
-```
+The reference run checked into [`after/OrderManagement/`](after/OrderManagement/) is the Opus 4.7 1M result. Full per-model scorecards (with criterion-by-criterion findings and the rubric's change history) live in **[results/evaluation-results.md](results/evaluation-results.md)**; recurring mistake patterns are tracked in **[results/ai-mistakes-log.md](results/ai-mistakes-log.md)**.
 
 ## Repository Structure
 
@@ -170,7 +197,7 @@ Trellis-training/
 
 ## Related repositories
 
-- [`xavierjohn/Trellis`](https://github.com/xavierjohn/Trellis) — the framework being benchmarked: `Result<T>`, `Maybe<T>`, value objects, DDD primitives, ASP.NET / EF Core / Mediator integration.
+- [`xavierjohn/Trellis`](https://github.com/xavierjohn/Trellis) — the framework you're learning: `Result<T>`, `Maybe<T>`, value objects, DDD primitives, ASP.NET / EF Core / Mediator integration.
 - [`xavierjohn/Trellis.AspTemplate`](https://github.com/xavierjohn/Trellis.AspTemplate) — `dotnet new trellis-asp` single-service Clean Architecture template used by the OM, worker, and URL-shortener labs.
 - [`xavierjohn/Trellis.Microservices`](https://github.com/xavierjohn/Trellis.Microservices) — microservice trust-boundary packages: YARP gateway + consumer-side actor provider.
 - [`xavierjohn/Trellis.Microservices.Template`](https://github.com/xavierjohn/Trellis.Microservices.Template) — `dotnet new trellis-microservices` multi-service Project Tracker template. A future multi-service lab will benchmark AI consistency across the gateway + downstream services topology.
