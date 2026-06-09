@@ -102,7 +102,7 @@ NotFound  Insufficient  DbError  ─────→ ProblemDetails (RFC 9457)
 ```
 Each step returns a `Result`; the first failure short-circuits onto the failure track and the remaining steps are skipped. The commit is a **framework pipeline stage** (`AddTrellisUnitOfWork<AppDbContext>` in `Acl/src/DependencyInjection.cs`) — handlers never call `SaveChanges`. Show how errors propagate without try/catch.
 
-Regenerate with [`gen_rop_pipeline.py`](gen_rop_pipeline.py) (`python docs/images/gen_rop_pipeline.py`).
+Authored as a standalone infographic (not script-generated) — update the PNG directly if the handler shape changes.
 
 ---
 
