@@ -37,6 +37,10 @@ By the end you'll understand, in working code, how Trellis shapes each of these 
 
 Skim this once now; you'll *recognize* each pattern when you read the generated code, and the [guided tour](#guided-tour-of-the-reference-implementation) points you at the exact file for each. Don't memorize it — the goal is to know what to look for.
 
+<p align="center">
+  <img src="images/trellis-concepts.png" alt="The Trellis building blocks — Foundation (Result/Maybe), Domain Modeling, Application (Mediator pipeline), and Boundaries (Clean Architecture, EF Core, Authorization), verified by Trellis.Testing" width="780"/>
+</p>
+
 | Concept | What it is | Why Trellis uses it | First see it in |
 |---|---|---|---|
 | **`Result<T>` + Railway-Oriented Programming** | A return type carrying either a value or an `Error`. Operations chain with `Bind` / `Map` / `Ensure`; the first failure short-circuits the rest. | Expected failures become **values, not exceptions** — explicit in signatures, trivially testable, no hidden control flow. | `Domain/src/Aggregates/Order.cs` |
