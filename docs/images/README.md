@@ -45,16 +45,18 @@ Each state as a rounded rectangle with color coding (Draft=gray, Submitted=blue,
 ```
 Each step as a numbered circle or card connected by arrows. Steps 4 and 8 highlighted (these are the AI-driven steps). Clean, minimal design.
 
-### 6. `evaluation-radar.png` (500×500)
+### 6. `evaluation-radar.png` (landscape, displayed at width 500)
 **Used in:** README.md "Evaluation" section
-**Concept:** Radar/spider chart with 5 axes:
+**Concept:** Radar/spider chart with 5 axes, each normalized so the outer ring is full marks:
 - L1: Structural (18 pts)
 - L2: Behavioral (13 pts)
 - L3: Architecture (13 pts)
 - L4: Tests (9 pts)
 - L5: Feedback (4 pts)
 
-Show 2-3 overlaid polygons representing different AI models (e.g., Opus 4.6 filling most of the chart, Sonnet 4 filling much less). Include a legend. Colors: Opus=blue fill, Sonnet=gray fill.
+Overlay one polygon per model in the current alpha.360 cohort — Opus 4.8, Sonnet 4.6, Opus 4.7 1M, GPT-5.5, and Haiku 4.5 — with a legend showing each model's total score. The four PASS models cluster near the outer ring; Haiku 4.5 (the only FAIL) visibly pulls in on L3 and L5.
+
+Regenerate with [`gen_radar.py`](gen_radar.py) (`python docs/images/gen_radar.py`); source data is the "Current cohort" table in [`results/evaluation-results.md`](../../results/evaluation-results.md).
 
 ### 7. `aspire-dashboard.png` (700×400)
 **Used in:** README.md "Observability" section
