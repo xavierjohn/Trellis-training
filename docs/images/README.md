@@ -104,6 +104,12 @@ Each step returns a `Result`; the first failure short-circuits onto the failure 
 
 Authored as a standalone infographic (not script-generated) — update the PNG directly if the handler shape changes.
 
+### 10. `trellis-concepts.png` (landscape ~16:9, displayed at width 780)
+**Used in:** docs/training-lab.md "Core Trellis concepts you'll meet" section
+**Concept:** A left-to-right concept map — "The Trellis Building Blocks" — grouping the framework's core pieces into four columns: **Foundation** (`Result<T>` / Railway-Oriented Programming, `Maybe<T>`), **Domain Modeling** (value objects, aggregates & entities, specifications, state machine), **Application** (Commands / Queries → a Mediator Pipeline pill: Validation → Authorization → Unit of Work), and **Boundaries** (Clean Architecture `API → ACL → Application → Domain`, EF Core conventions, Authorization). A `Trellis.Testing` tag underneath verifies the whole flow, with a red "errors short-circuit (ROP)" side-rail beneath. Keep the Clean Architecture arrow pointing inward (`API → ACL → Application → Domain`).
+
+Authored as a standalone infographic (not script-generated) — update the PNG directly if the building blocks change.
+
 ---
 
 ## Style Guidelines
