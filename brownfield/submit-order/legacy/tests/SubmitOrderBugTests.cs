@@ -15,6 +15,32 @@ using Xunit;
 /// </summary>
 public class SubmitOrderBugTests
 {
+    // Sanity: the README promises `dotnet run` yields a working service. This boots the real app on
+    // a brand-new database that nothing pre-creates, exercising the startup EnsureCreated. Without
+    // it, the first request 500s with a missing-table error instead of a clean 404.
+    [Fact]
+    public async Task App_BootsAndCreatesSchema_OnAFreshDatabase()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"legacy-fresh-{Guid.NewGuid():N}.db");
+        try
+        {
+            await using var factory = new WebApplicationFactory<Program>()
+                .WithWebHostBuilder(b => b.UseSetting("ConnectionStrings:Db", $"Data Source={dbPath}"));
+            var client = factory.CreateClient();
+
+            var health = await client.GetAsync("/health", TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+
+            // A submit against the freshly-created (empty) schema returns 404 — not a 500 missing-table crash.
+            var submit = await client.PostAsync($"/orders/{Guid.NewGuid()}/submit", content: null, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.NotFound, submit.StatusCode);
+        }
+        finally
+        {
+            try { File.Delete(dbPath); } catch { /* best-effort temp cleanup */ }
+        }
+    }
+
     // BUG 1 — Concurrency / lost update → oversell.
     [Fact]
     public void Bug1_NoOptimisticConcurrency_ConcurrentSubmits_Oversell()
@@ -97,7 +123,7 @@ public class SubmitOrderBugTests
 
     // BUG 3 — Error mapping: a business failure surfaces as 500 + leaked internal detail.
     [Fact]
-    public async Task Bug3_InsufficientStock_Returns500WithLeakedMessage_NotA422()
+    public async Task Bug3_InsufficientStock_Returns500WithLeakedMessage_NotA4xx()
     {
         await using var app = new LegacyApp();
         var productId = app.SeedProduct("Widget", stock: 1, price: 10m);
@@ -106,11 +132,11 @@ public class SubmitOrderBugTests
 
         var response = await client.PostAsync($"/orders/{order}/submit", content: null, TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode); // should be 422
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode); // a rejected business rule should be a 4xx, not a 500
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("Insufficient stock", body); // internal detail leaked to the caller
-        // Trellis maps Error.InvalidInput.ForRule(...) to 422 Unprocessable Content + RFC 9457
-        // ProblemDetails, with no exception and no stack trace.
+        // Trellis maps Error.InvalidInput.ForRule(...) to a 4xx client error + RFC 9457 ProblemDetails
+        // (the OM spec's error table lists 400; Trellis defaults to 422) — never a 500, no stack trace.
     }
 
     // BUG 5 — Authorization: the orders:submit permission is never checked.

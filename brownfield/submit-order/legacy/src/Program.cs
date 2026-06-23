@@ -9,6 +9,11 @@ builder.Services.AddDbContext<AppDb>(options =>
 
 var app = builder.Build();
 
+// Create the schema on startup so `dotnet run` yields a working service on a fresh DB (dev only —
+// the spec uses EnsureCreated, not migrations). Without this, a manual run hits missing-table errors.
+using (var scope = app.Services.CreateScope())
+    scope.ServiceProvider.GetRequiredService<AppDb>().Database.EnsureCreated();
+
 app.MapGet("/health", () => Results.Ok("ok"));
 
 app.MapPost("/orders/{id:guid}/submit", async (Guid id, HttpContext ctx, AppDb db) =>
