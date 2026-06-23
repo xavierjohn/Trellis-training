@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Legacy.csproj" />
+  <Project Path="tests/Legacy.Tests.csproj" />
+</Solution>

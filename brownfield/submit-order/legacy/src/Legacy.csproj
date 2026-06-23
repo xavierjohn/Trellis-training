@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Legacy</RootNamespace>
+    <AssemblyName>Legacy</AssemblyName>
+    <!-- This is a DELIBERATELY un-idiomatic "legacy" service used as the before/ side of a
+         brownfield comparison. It does NOT use Trellis and intentionally contains the bugs the
+         conversion eliminates. Do not copy these patterns. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.7" />
+  </ItemGroup>
+
+</Project>
