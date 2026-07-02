@@ -61,7 +61,7 @@ public class CancelOrderCommandTests
             UnitPrice.Create(1m));
         product.AddStock(10).IsSuccess.Should().BeTrue();
 
-        var order = new Order(CustomerId.NewUniqueV7(), OrderManagement.Domain.ActorId.Create(ownerActorId), clock);
+        var order = new Order(CustomerId.NewUniqueV7(), ActorId.Create(ownerActorId), clock);
         order.AddLineItem(product.Id, product.ProductName, LineItemQuantity.Create(1), product.UnitPrice)
             .IsSuccess.Should().BeTrue();
         return order;

@@ -13,11 +13,11 @@ public record ShippingAddressResponse
 
     public static ShippingAddressResponse From(ShippingAddress address) => new()
     {
-        Street = address.Street.Value,
-        City = address.City.Value,
-        State = address.State.Value,
-        PostalCode = address.PostalCode.Value,
-        Country = address.Country.Value,
+        Street = address.Street,
+        City = address.City,
+        State = address.State,
+        PostalCode = address.PostalCode,
+        Country = address.Country,
     };
 }
 
@@ -33,10 +33,10 @@ public record CustomerResponse
 
     public static CustomerResponse From(Customer customer) => new()
     {
-        Id = customer.Id.Value,
-        FirstName = customer.FirstName.Value,
-        LastName = customer.LastName.Value,
-        Email = customer.Email.Value,
+        Id = customer.Id,
+        FirstName = customer.FirstName,
+        LastName = customer.LastName,
+        Email = customer.Email,
         PhoneNumber = customer.PhoneNumber.Match<string?>(p => p.Value, () => null),
         ShippingAddress = ShippingAddressResponse.From(customer.ShippingAddress),
     };

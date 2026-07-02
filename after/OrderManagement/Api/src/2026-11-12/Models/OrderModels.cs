@@ -15,11 +15,11 @@ public record LineItemResponse
 
     public static LineItemResponse From(LineItem li) => new()
     {
-        Id = li.Id.Value,
-        ProductId = li.ProductId.Value,
-        ProductName = li.ProductName.Value,
-        Quantity = li.Quantity.Value,
-        UnitPrice = li.UnitPrice.Value,
+        Id = li.Id,
+        ProductId = li.ProductId,
+        ProductName = li.ProductName,
+        Quantity = li.Quantity,
+        UnitPrice = li.UnitPrice,
         LineTotal = li.LineTotal,
     };
 }
@@ -34,18 +34,24 @@ public record OrderResponse
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? SubmittedAt { get; init; }
     public DateTimeOffset? ShippedAt { get; init; }
+    public DateTimeOffset? PaidAt { get; init; }
+    public string? PaymentReference { get; init; }
+    public decimal? PaidAmount { get; init; }
     public IReadOnlyList<LineItemResponse> LineItems { get; init; } = [];
     public decimal OrderTotal { get; init; }
 
     public static OrderResponse From(Order order) => new()
     {
-        Id = order.Id.Value,
-        CustomerId = order.CustomerId.Value,
-        CreatedByActorId = order.CreatedByActorId.Value,
-        Status = order.Status.Value,
+        Id = order.Id,
+        CustomerId = order.CustomerId,
+        CreatedByActorId = order.CreatedByActorId,
+        Status = order.Status,
         CreatedAt = order.CreatedAt,
         SubmittedAt = order.SubmittedAt.Match<DateTimeOffset?>(t => t, () => null),
         ShippedAt = order.ShippedAt.Match<DateTimeOffset?>(t => t, () => null),
+        PaidAt = order.PaidAt.Match<DateTimeOffset?>(t => t, () => null),
+        PaymentReference = order.PaymentReference.Match<string?>(r => r.Value, () => null),
+        PaidAmount = order.PaidAmount.Match<decimal?>(a => a, () => null),
         LineItems = order.LineItems.Select(LineItemResponse.From).ToList(),
         OrderTotal = order.OrderTotal,
     };

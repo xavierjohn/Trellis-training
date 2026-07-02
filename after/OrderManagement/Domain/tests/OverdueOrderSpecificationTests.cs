@@ -2,6 +2,7 @@ namespace Domain.Tests;
 
 using Microsoft.Extensions.Time.Testing;
 using OrderManagement.Domain;
+using Trellis.Authorization;
 
 public class OverdueOrderSpecificationTests
 {
@@ -43,6 +44,8 @@ public class OverdueOrderSpecificationTests
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero));
         var order = CreateOrder(clock);
         SubmitFully(order, clock);
+        order.RecordPayment(PaymentRef.Create($"PAY-{order.Id.Value:N}"), order.OrderTotal, clock.GetUtcNow())
+            .IsSuccess.Should().BeTrue();
         order.Approve(clock).IsSuccess.Should().BeTrue();
 
         var spec = new OverdueOrderSpecification(clock.GetUtcNow().AddDays(365));

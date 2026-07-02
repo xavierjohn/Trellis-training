@@ -73,6 +73,9 @@ The system uses role-based access control. Sales representatives create customer
 - CreatedAt — UTC timestamp when order was created
 - SubmittedAt — UTC timestamp when order was submitted (absent if not yet submitted)
 - ShippedAt — UTC timestamp when order was shipped (absent if not yet shipped)
+- PaidAt — UTC timestamp when payment was confirmed (absent if payment not yet confirmed)
+- PaymentReference — external payment-gateway reference recorded on payment confirmation (absent until paid)
+- PaidAmount — amount recorded when payment was confirmed (absent until paid)
 
 **Line Item Properties:**
 - LineItemId (unique identifier)
@@ -88,6 +91,7 @@ The system uses role-based access control. Sales representatives create customer
 - The same product cannot appear in multiple line items within the same order. Combine quantities instead.
 - Quantity per line item must be between 1 and 999.
 - Unit price is captured at the time the line item is added and does not change if the product price changes later.
+- Payment must be confirmed (via the payment round-trip in Section 11) before an order can be approved. Recording a payment is idempotent for an exact duplicate (same reference and amount) and rejects a conflicting different payment.
 
 ## 4. State Machine
 
@@ -111,7 +115,7 @@ Approved → Cancelled
 - Domain event: OrderSubmittedEvent(OrderId, CustomerId, OrderTotal, SubmittedAt)
 
 **Transition: Submitted → Approved**
-- Precondition: None beyond being in Submitted status.
+- Precondition: Payment must already be confirmed for the order (PaidAt present). Approving an unpaid order fails with a validation error (422). See Section 11 for the payment round-trip.
 - Domain event: OrderApprovedEvent(OrderId, ApprovedAt)
 
 **Transition: Approved → Shipped**
@@ -129,6 +133,10 @@ Approved → Cancelled
 - Domain event: OrderCancelledEvent(OrderId, CancelledFromStatus, CancelledAt)
 
 **Invalid transitions produce a Validation error with a message explaining why the transition is not allowed.**
+
+**Payment confirmation (not a state transition)**
+- Recording a confirmed payment sets PaidAt, PaymentReference, and PaidAmount and raises OrderPaidEvent(OrderId, PaymentReference, PaidAt). It does not change the order status — it is a precondition that unblocks the Submitted → Approved transition.
+- Idempotent: recording the exact same payment (same reference and amount) again is a no-op success; a different payment for an already-paid order is a Conflict (409).
 
 ## 5. Authorization
 
@@ -245,9 +253,9 @@ All operations are implemented as Commands or Queries using CQRS.
 
 - **Permission required:** `orders:approve`
 - **Input:** orderId
-- **Behavior:** Fires state machine transition Submitted → Approved.
+- **Behavior:** Fires state machine transition Submitted → Approved. Requires that payment has already been confirmed for the order (see Section 11) — approval is gated on the payment round-trip.
 - **Success:** Returns the Order in Approved status.
-- **Failure:** Invalid transition → 400. Order not found → 404.
+- **Failure:** Payment not yet confirmed → 422. Invalid transition → 400. Order not found → 404.
 
 ### 6.9 Ship Order (Command)
 
@@ -345,6 +353,8 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 | Duplicate SKU on product creation | Conflict error | 409 |
 | Missing required permission | Forbidden error | 403 |
 | Cancel order by non-owner (without admin) | Forbidden error | 403 |
+| Approve an order before its payment is confirmed | Validation error | 422 |
+| Record a conflicting payment (different reference or amount already recorded) | Conflict error | 409 |
 
 ## 10. Testing Requirements
 
@@ -357,6 +367,7 @@ Unit tests for each aggregate's business rules. No external dependencies.
 - Order: create with line items, add/remove line items, duplicate product rejection, last line item protection
 - State machine: every valid transition, every invalid transition, stock reservation on submit, stock release on cancel
 - Overdue specification: matches orders submitted 8+ days ago, excludes recent orders and approved orders
+- Payment: approval is blocked before payment is confirmed; recording payment then approving succeeds; an exact-duplicate payment is idempotent; a different payment conflicts
 
 ### 10.2 Application Tests
 
@@ -373,9 +384,48 @@ HTTP round-trip tests using a test web application factory with SQLite in-memory
 - Create customer → 201 with Location header
 - Duplicate email → 409 with Problem Details
 - Missing permission → 403
-- Full order lifecycle: create customer, create product, add stock, create order, submit, approve, ship, deliver
+- Full order lifecycle: create customer, create product, add stock, create order, submit, confirm payment, approve, ship, deliver
 - Cancel by non-owner → 403
 - Cancel by owner → 200
 - Overdue orders query → 200 with correct filtered list
 - Missing api-version → 400
 - Health check → 200
+- Eventing: submitting an order captures an OrderSubmitted message in the outbox; a PaymentConfirmed event dispatched through the inbox unblocks approval; dispatching the same PaymentConfirmed event twice is de-duplicated by the inbox
+
+## 11. Payment Round-Trip and Integration Events
+
+An order cannot be approved until its payment has been confirmed. Payment confirmation arrives asynchronously from an external payments bounded context, delivered reliably via a transactional **outbox** (producing side) and an idempotent **inbox** (consuming side).
+
+### 11.1 Flow
+
+1. A client submits a Draft order (Section 6.7). In the SAME database transaction as the order change, the OrderSubmitted domain event is captured to the outbox and translated to a stable `OrderSubmittedIntegrationEvent` contract. Nothing is published to the broker inside the request, so a submit either fully commits (order + outbox row) or not at all — no lost events, no dual-write.
+2. A background relay publishes committed outbox messages to the message broker after the transaction commits (at-least-once delivery).
+3. The external payments service observes OrderSubmitted and, once payment clears, publishes a `PaymentConfirmedIntegrationEvent` back onto the broker.
+4. A consumer receives PaymentConfirmed and dispatches it through the idempotent inbox, which de-duplicates redeliveries by event id (per consumer) before invoking the handler.
+5. The handler records the payment on the order (setting PaidAt / PaymentReference / PaidAmount and raising OrderPaidEvent), which unblocks the Submitted → Approved transition (Section 6.8).
+
+### 11.2 Integration Event Contracts
+
+Stable, versioned, transport-facing records (camelCase JSON), decoupled from the internal domain events:
+
+- `OrderSubmittedIntegrationEvent(EventId, OrderId, CustomerId, OrderTotal, OccurredAt, Currency = "USD")` — message type `orders.order-submitted.v1`.
+- `OrderCancelledIntegrationEvent(EventId, OrderId, CancelledFromStatus, OccurredAt)` — message type `orders.order-cancelled.v1`.
+- `PaymentConfirmedIntegrationEvent(EventId, OrderId, AmountPaid, PaymentReference, OccurredAt, Currency = "USD")` — message type `payments.payment-confirmed.v1`.
+
+Event ids are deterministic (UUIDv5 over the order id plus a discriminator) so a retried translation yields the same integration event id, aiding consumer de-duplication ("dedupe on business identity, not the transport message id").
+
+### 11.3 Hardened Consumer Rules
+
+The PaymentConfirmed handler records payment ONLY for a Submitted order whose total matches the confirmed USD amount. Every other outcome is logged and acknowledged (so the broker does not redeliver a poison message forever):
+
+- Non-USD currency → ignored.
+- Unknown or non-Submitted order (including cancelled) → ignored.
+- Malformed payment reference → ignored.
+- Amount does not match the order total → ignored.
+- A conflicting different payment already recorded → ignored (logged as an error).
+
+Because delivery is at-least-once, the handler is idempotent: the inbox de-duplicates by event id, and RecordPayment no-ops an exact duplicate.
+
+### 11.4 Development Payment Simulator
+
+In development only, a simulator stands in for the external payments service: shortly after an order is submitted it publishes a matching `PaymentConfirmedIntegrationEvent` back onto the broker, so the submit → pay → approve round-trip can be exercised end-to-end without a real payments provider. Production wires a real PaymentConfirmed source instead.
