@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -39,11 +38,22 @@ public class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>, 
     {
         builder.ConfigureLogging(p => p.AddXUnit(this));
 
-        // Disable the background eventing services (outbox relay, broker consumer, and the
-        // development payment simulator) so integration tests drive the outbox/inbox payment
-        // round-trip deterministically through IInboxDispatcher instead of racing asynchronous
-        // background delivery.
-        builder.ConfigureServices(services => services.RemoveAll<IHostedService>());
+        // Disable the background eventing services — the Trellis outbox relay
+        // (Trellis.EntityFrameworkCore) and the broker consumer + development payment simulator
+        // (OrderManagement.AntiCorruptionLayer.Eventing) — so integration tests drive the
+        // outbox/inbox round-trip deterministically through IInboxDispatcher, and no background
+        // worker concurrently touches the shared in-memory SQLite connection. Any other
+        // (non-eventing) hosted services are left running.
+        builder.ConfigureServices(services =>
+        {
+            var eventingHostedServices = services
+                .Where(d => d.ServiceType == typeof(IHostedService)
+                    && d.ImplementationType?.Namespace is "Trellis.EntityFrameworkCore"
+                        or "OrderManagement.AntiCorruptionLayer.Eventing")
+                .ToList();
+            foreach (var descriptor in eventingHostedServices)
+                services.Remove(descriptor);
+        });
 
         if (UseRealServices)
             return;

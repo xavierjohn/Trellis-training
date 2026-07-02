@@ -29,7 +29,10 @@ internal sealed partial class PaymentConfirmedHandler(
         }
 
         if (!OrderId.TryCreate(integrationEvent.OrderId).TryGetValue(out var orderId))
+        {
+            LogInvalidOrderId(logger, integrationEvent.OrderId);
             return;
+        }
 
         var orderMaybe = await orderRepository.FindByIdAsync(orderId, cancellationToken);
         if (!orderMaybe.TryGetValue(out var order))
@@ -79,4 +82,7 @@ internal sealed partial class PaymentConfirmedHandler(
 
     [LoggerMessage(6, LogLevel.Error, "PaymentConfirmed for order {OrderId} ignored: a different payment (ref {PaymentReference}) is already recorded.")]
     static partial void LogConflictingPayment(ILogger logger, Guid orderId, string paymentReference);
+
+    [LoggerMessage(7, LogLevel.Warning, "PaymentConfirmed with an invalid order id {OrderId} ignored.")]
+    static partial void LogInvalidOrderId(ILogger logger, Guid orderId);
 }

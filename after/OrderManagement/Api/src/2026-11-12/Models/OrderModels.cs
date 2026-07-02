@@ -34,6 +34,9 @@ public record OrderResponse
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? SubmittedAt { get; init; }
     public DateTimeOffset? ShippedAt { get; init; }
+    public DateTimeOffset? PaidAt { get; init; }
+    public string? PaymentReference { get; init; }
+    public decimal? PaidAmount { get; init; }
     public IReadOnlyList<LineItemResponse> LineItems { get; init; } = [];
     public decimal OrderTotal { get; init; }
 
@@ -46,6 +49,9 @@ public record OrderResponse
         CreatedAt = order.CreatedAt,
         SubmittedAt = order.SubmittedAt.Match<DateTimeOffset?>(t => t, () => null),
         ShippedAt = order.ShippedAt.Match<DateTimeOffset?>(t => t, () => null),
+        PaidAt = order.PaidAt.Match<DateTimeOffset?>(t => t, () => null),
+        PaymentReference = order.PaymentReference.Match<string?>(r => r.Value, () => null),
+        PaidAmount = order.PaidAmount.Match<decimal?>(a => a, () => null),
         LineItems = order.LineItems.Select(LineItemResponse.From).ToList(),
         OrderTotal = order.OrderTotal,
     };

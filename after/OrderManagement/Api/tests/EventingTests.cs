@@ -30,16 +30,23 @@ public class EventingTests
     public async Task Submitting_an_order_captures_an_outbox_message()
     {
         var client = _fixture.CreateClient();
-        var (order, _) = await CreateAndSubmitOrderAsync(client);
 
+        // The in-memory SQLite database is shared across the collection, so assert on the delta
+        // rather than absolute presence: this submit must add exactly one OrderSubmitted outbox
+        // row, captured in the same transaction as the order change.
+        var before = await CountOrderSubmittedOutboxAsync();
+        await CreateAndSubmitOrderAsync(client);
+        var after = await CountOrderSubmittedOutboxAsync();
+
+        after.Should().Be(before + 1);
+    }
+
+    private async Task<int> CountOrderSubmittedOutboxAsync()
+    {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var outbox = await db.Set<OutboxMessage>()
-            .Where(m => m.EventType.Contains("OrderSubmitted"))
-            .ToListAsync(TestContext.Current.CancellationToken);
-
-        outbox.Should().NotBeEmpty("submitting an order captures the OrderSubmitted event to the outbox in the same transaction");
-        _ = order;
+        return await db.Set<OutboxMessage>()
+            .CountAsync(m => m.EventType.Contains("OrderSubmitted"), TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -60,6 +67,11 @@ public class EventingTests
             $"/api/orders/{order.Id}/approval?api-version={ApiVersion}", EmptyBody(),
             TestContext.Current.CancellationToken);
         approved.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // The confirmed payment is exposed on the order response.
+        var approvedOrder = (await approved.Content.ReadFromJsonAsync<OrderResponse>(TestContext.Current.CancellationToken))!;
+        approvedOrder.PaidAt.Should().NotBeNull();
+        approvedOrder.PaymentReference.Should().NotBeNull();
     }
 
     [Fact]
