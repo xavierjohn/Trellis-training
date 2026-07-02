@@ -2,6 +2,12 @@
   <ItemGroup>
     <PackageReference Include="Trellis.Core" />
     <PackageReference Include="Trellis.Primitives" />
+    <!--
+      The Order aggregate records its creator as Trellis.Authorization.ActorId
+      (Order.CreatedByActorId) so ownership checks compare directly against Actor.Id.
+      ApplyTrellisConventions auto-registers the ActorId scalar converter.
+    -->
+    <PackageReference Include="Trellis.Authorization" />
     <PackageReference Include="Trellis.StateMachine" />
     <!--
       Analyzer-only reference to pull the MaybePartialPropertyGenerator

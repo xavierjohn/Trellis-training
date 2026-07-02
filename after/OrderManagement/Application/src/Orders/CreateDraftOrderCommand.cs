@@ -85,11 +85,7 @@ public sealed class CreateDraftOrderCommandHandler : ICommandHandler<CreateDraft
         var actor = (await _actorProvider.GetCurrentActorAsync(cancellationToken))
             .GetValueOrThrow("Actor must be present; IAuthorize pipeline guarantees this.");
 
-        var actorIdResult = OrderManagement.Domain.ActorId.TryCreate(actor.Id);
-        if (!actorIdResult.TryGetValue(out var actorId))
-            return Result.Fail<Order>(actorIdResult.Error!);
-
-        var order = new Order(command.CustomerId, actorId, _timeProvider);
+        var order = new Order(command.CustomerId, actor.Id, _timeProvider);
         foreach (var draftLine in command.LineItems)
         {
             var product = productsById[draftLine.ProductId];

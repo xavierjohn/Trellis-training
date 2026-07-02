@@ -1,5 +1,6 @@
 ﻿namespace OrderManagement.Domain;
 
+using Trellis.Authorization;
 using Trellis.StateMachine;
 
 /// <summary>
@@ -31,6 +32,15 @@ public partial class Order : Aggregate<OrderId>
     /// <summary>When the order was shipped, or <see cref="Maybe{T}.None"/> if not yet shipped.</summary>
     public partial Maybe<DateTimeOffset> ShippedAt { get; private set; }
 
+    /// <summary>When the order's payment was confirmed, or <see cref="Maybe{T}.None"/> if unpaid.</summary>
+    public partial Maybe<DateTimeOffset> PaidAt { get; private set; }
+
+    /// <summary>The external payment-gateway reference recorded when payment was confirmed.</summary>
+    public partial Maybe<PaymentRef> PaymentReference { get; private set; }
+
+    /// <summary>The amount recorded when payment was confirmed.</summary>
+    public partial Maybe<decimal> PaidAmount { get; private set; }
+
     public IReadOnlyList<LineItem> LineItems => _lineItems;
 
     /// <summary>Sum of (Quantity * UnitPrice) across all line items.</summary>
@@ -58,6 +68,9 @@ public partial class Order : Aggregate<OrderId>
         CreatedAt = timeProvider.GetUtcNow();
         SubmittedAt = Maybe<DateTimeOffset>.None;
         ShippedAt = Maybe<DateTimeOffset>.None;
+        PaidAt = Maybe<DateTimeOffset>.None;
+        PaymentReference = Maybe<PaymentRef>.None;
+        PaidAmount = Maybe<decimal>.None;
 
         _machine = new LazyStateMachine<OrderStatus, string>(
             () => Status,
@@ -166,10 +179,21 @@ public partial class Order : Aggregate<OrderId>
             });
     }
 
-    /// <summary>Submitted → Approved.</summary>
-    public Result<OrderStatus> Approve(TimeProvider timeProvider) =>
-        _machine.FireResult(Triggers.Approve)
+    /// <summary>
+    /// Submitted → Approved. Requires that payment has already been confirmed via
+    /// <see cref="RecordPayment"/> — approval is gated on the payment round-trip.
+    /// </summary>
+    public Result<OrderStatus> Approve(TimeProvider timeProvider)
+    {
+        if (!PaidAt.HasValue)
+            return Result.Fail<OrderStatus>(
+                Error.InvalidInput.ForRule(
+                    "order.not-paid",
+                    "Cannot approve an order before its payment has been confirmed."));
+
+        return _machine.FireResult(Triggers.Approve)
             .Tap(_ => DomainEvents.Add(new OrderApprovedEvent(Id, timeProvider.GetUtcNow())));
+    }
 
     /// <summary>Approved → Shipped.</summary>
     public Result<OrderStatus> Ship(TimeProvider timeProvider) =>
@@ -222,6 +246,34 @@ public partial class Order : Aggregate<OrderId>
                 return Result.Ok(status);
             })
             .Tap(_ => DomainEvents.Add(new OrderCancelledEvent(Id, fromStatus, timeProvider.GetUtcNow())));
+    }
+
+    /// <summary>
+    /// Records payment confirmation for this order. Idempotent for an exact duplicate
+    /// (same reference and amount); returns a conflict error if a <em>different</em>
+    /// payment is already recorded. Raises <see cref="OrderPaidEvent"/> on first record.
+    /// </summary>
+    public Result<Unit> RecordPayment(PaymentRef paymentReference, decimal amountPaid, DateTimeOffset confirmedAt)
+    {
+        if (PaidAt.HasValue)
+        {
+            var sameRef = PaymentReference.Match(stored => stored == paymentReference, () => false);
+            var sameAmount = PaidAmount.Match(stored => stored == amountPaid, () => false);
+            if (sameRef && sameAmount)
+                return Result.Ok();
+
+            return Result.Fail<Unit>(
+                Error.Conflict.For<Order>(
+                    Id,
+                    "order.payment-conflict",
+                    "A different payment was already recorded for this order."));
+        }
+
+        PaidAt = confirmedAt;
+        PaymentReference = paymentReference;
+        PaidAmount = amountPaid;
+        DomainEvents.Add(new OrderPaidEvent(Id, paymentReference, confirmedAt));
+        return Result.Ok();
     }
 
     private static void ConfigureStateMachine(Stateless.StateMachine<OrderStatus, string> machine)

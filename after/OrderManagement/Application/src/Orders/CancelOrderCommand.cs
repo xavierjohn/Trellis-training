@@ -39,7 +39,7 @@ public sealed record CancelOrderCommand(OrderId OrderId)
     /// <inheritdoc />
     public IResult Authorize(Actor actor, Order resource) =>
         Result.Ensure(
-            resource.CreatedByActorId.Value == actor.Id || actor.HasPermission(Permissions.OrdersReadAll),
+            resource.CreatedByActorId == actor.Id || actor.HasPermission(Permissions.OrdersReadAll),
             new Error.Forbidden(
                 PolicyId: "orders.cancel.owner-or-admin",
                 Resource: ResourceRef.For<Order>(OrderId))

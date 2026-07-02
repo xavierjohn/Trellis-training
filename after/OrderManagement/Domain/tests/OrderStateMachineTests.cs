@@ -2,6 +2,7 @@ namespace Domain.Tests;
 
 using Microsoft.Extensions.Time.Testing;
 using OrderManagement.Domain;
+using Trellis.Authorization;
 
 public class OrderStateMachineTests
 {
@@ -71,8 +72,9 @@ public class OrderStateMachineTests
     {
         var (order, _, _, clock) = Arrange();
 
-        // Approve before Submit is invalid.
-        var result = order.Approve(clock);
+        // Ship before the order has been submitted/approved is an invalid state-machine
+        // transition (Draft only permits Submit or Cancel).
+        var result = order.Ship(clock);
 
         result.IsFailure.Should().BeTrue();
         order.Status.Should().Be(OrderStatus.Draft);
@@ -113,16 +115,79 @@ public class OrderStateMachineTests
         var products = new Dictionary<ProductId, Product> { [product.Id] = product };
 
         order.Submit(products, clock).IsSuccess.Should().BeTrue();
+        order.RecordPayment(PaymentRef.Create($"PAY-{order.Id.Value:N}"), order.OrderTotal, clock.GetUtcNow())
+            .IsSuccess.Should().BeTrue();
         order.Approve(clock).IsSuccess.Should().BeTrue();
         order.Ship(clock).IsSuccess.Should().BeTrue();
         order.Deliver(clock).IsSuccess.Should().BeTrue();
 
         order.Status.Should().Be(OrderStatus.Delivered);
-        order.UncommittedEvents().Should().HaveCount(4);
+        order.UncommittedEvents().Should().HaveCount(5);
         order.UncommittedEvents().Select(e => e.GetType()).Should().Equal(
             typeof(OrderSubmittedEvent),
+            typeof(OrderPaidEvent),
             typeof(OrderApprovedEvent),
             typeof(OrderShippedEvent),
             typeof(OrderDeliveredEvent));
+    }
+
+    [Fact]
+    public void Approve_BeforePaymentConfirmed_Fails()
+    {
+        var (order, product, _, clock) = Arrange();
+        order.Submit(new Dictionary<ProductId, Product> { [product.Id] = product }, clock)
+            .IsSuccess.Should().BeTrue();
+
+        // Approval is gated on the payment round-trip: an unpaid Submitted order cannot be approved.
+        var result = order.Approve(clock);
+
+        result.IsFailure.Should().BeTrue();
+        order.Status.Should().Be(OrderStatus.Submitted);
+    }
+
+    [Fact]
+    public void RecordPayment_ThenApprove_Succeeds()
+    {
+        var (order, product, _, clock) = Arrange();
+        order.Submit(new Dictionary<ProductId, Product> { [product.Id] = product }, clock)
+            .IsSuccess.Should().BeTrue();
+
+        order.RecordPayment(PaymentRef.Create("PAY-001"), order.OrderTotal, clock.GetUtcNow())
+            .IsSuccess.Should().BeTrue();
+
+        order.PaidAt.HasValue.Should().BeTrue();
+        order.UncommittedEvents().OfType<OrderPaidEvent>().Should().HaveCount(1);
+        order.Approve(clock).IsSuccess.Should().BeTrue();
+        order.Status.Should().Be(OrderStatus.Approved);
+    }
+
+    [Fact]
+    public void RecordPayment_ExactDuplicate_IsIdempotent()
+    {
+        var (order, product, _, clock) = Arrange();
+        order.Submit(new Dictionary<ProductId, Product> { [product.Id] = product }, clock)
+            .IsSuccess.Should().BeTrue();
+        var paymentRef = PaymentRef.Create("PAY-001");
+
+        order.RecordPayment(paymentRef, order.OrderTotal, clock.GetUtcNow()).IsSuccess.Should().BeTrue();
+        var second = order.RecordPayment(paymentRef, order.OrderTotal, clock.GetUtcNow());
+
+        second.IsSuccess.Should().BeTrue();
+        order.UncommittedEvents().OfType<OrderPaidEvent>().Should().HaveCount(1, "an exact duplicate payment is a no-op");
+    }
+
+    [Fact]
+    public void RecordPayment_DifferentPayment_Conflicts()
+    {
+        var (order, product, _, clock) = Arrange();
+        order.Submit(new Dictionary<ProductId, Product> { [product.Id] = product }, clock)
+            .IsSuccess.Should().BeTrue();
+        order.RecordPayment(PaymentRef.Create("PAY-001"), order.OrderTotal, clock.GetUtcNow())
+            .IsSuccess.Should().BeTrue();
+
+        var conflict = order.RecordPayment(PaymentRef.Create("PAY-002"), order.OrderTotal, clock.GetUtcNow());
+
+        conflict.IsFailure.Should().BeTrue();
+        conflict.Error.Should().BeOfType<Error.Conflict>();
     }
 }

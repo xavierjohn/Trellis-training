@@ -1,6 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <PackageReference Include="Trellis.EntityFrameworkCore" />
+    <PackageReference Include="Trellis.EntityFrameworkCore.Outbox" />
+    <PackageReference Include="Trellis.EntityFrameworkCore.Inbox" />
     <PackageReference Include="Trellis.Authorization" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
   </ItemGroup>

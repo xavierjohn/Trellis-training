@@ -21,13 +21,18 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AllowMissingPrunePackageData>true</AllowMissingPrunePackageData>
+    <!-- This reference build is pinned to a Trellis alpha (a point in time). Audit DIRECT
+         dependencies only, so a newly-published advisory on a TRANSITIVE package we do not
+         control (e.g. Microsoft.OpenApi, SQLitePCLRaw pulled by EF Core Sqlite) does not
+         break an otherwise-reproducible build. -->
+    <NuGetAuditMode>direct</NuGetAuditMode>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="$(MSBuildProjectName).Tests" />
     <Using Include="Trellis" />
     <PackageReference Include="DotNet.ReproducibleBuilds" PrivateAssets="All" />
-    <PackageReference Include="Trellis.Analyzers" />
+    <PackageReference Include="Trellis.Analyzers" PrivateAssets="All" />
   </ItemGroup>
 
   <PropertyGroup Condition=" '$(IsTestProject)' == 'false' ">

@@ -5,7 +5,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OrderManagement.AntiCorruptionLayer;
 using Trellis.EntityFrameworkCore;
@@ -37,13 +39,20 @@ public class TestWebApplicationFactoryFixture : WebApplicationFactory<Program>, 
     {
         builder.ConfigureLogging(p => p.AddXUnit(this));
 
+        // Disable the background eventing services (outbox relay, broker consumer, and the
+        // development payment simulator) so integration tests drive the outbox/inbox payment
+        // round-trip deterministically through IInboxDispatcher instead of racing asynchronous
+        // background delivery.
+        builder.ConfigureServices(services => services.RemoveAll<IHostedService>());
+
         if (UseRealServices)
             return;
 
         builder.ConfigureServices(services =>
             services.ReplaceDbProvider<AppDbContext>(options =>
                 options.UseSqlite(_connection!)
-                       .AddTrellisInterceptors()));
+                       .AddTrellisInterceptors()
+                       .AddTrellisOutboxInterceptor()));
     }
 
     protected override void Dispose(bool disposing)

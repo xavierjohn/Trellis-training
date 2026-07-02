@@ -14,6 +14,14 @@ builder.Services
     .AddApplication()
     .AddAntiCorruptionLayer(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=OrderManagement.db");
 
+// Development-only: simulate an external payments service that auto-confirms payment shortly
+// after an order is submitted, so the submit -> pay -> approve round-trip can be exercised
+// end-to-end without a real payments provider. Production wires a real PaymentConfirmed source.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddDevelopmentPaymentSimulator();
+}
+
 var app = builder.Build();
 
 // Create database schema in development (use migrations in production)

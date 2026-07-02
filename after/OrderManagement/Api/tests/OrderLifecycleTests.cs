@@ -4,9 +4,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using OrderManagement.Api.v2026_11_12.Models;
+using OrderManagement.Application.IntegrationEvents;
 using OrderManagement.Domain;
 using Trellis.Authorization;
+using Trellis.Mediator;
 
 /// <summary>
 /// End-to-end integration smoke tests for the Order Management API.
@@ -51,6 +54,9 @@ public class OrderLifecycleTests
 
         order = await TransitionAsync(client, $"/api/orders/{order.Id}/submission?api-version={ApiVersion}");
         order.Status.Should().Be("Submitted");
+
+        // Approval is gated on payment: confirm payment (via the inbox) before approving.
+        await ConfirmPaymentAsync(order.Id, order.OrderTotal);
 
         order = await TransitionAsync(client, $"/api/orders/{order.Id}/approval?api-version={ApiVersion}");
         order.Status.Should().Be("Approved");
@@ -187,5 +193,16 @@ public class OrderLifecycleTests
             TestContext.Current.CancellationToken);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<OrderResponse>(TestContext.Current.CancellationToken))!;
+    }
+
+    // Deterministically confirm payment by dispatching a PaymentConfirmed event straight through
+    // the inbox (bypassing the async broker/consumer), mirroring what the payments service would send.
+    private async Task ConfirmPaymentAsync(Guid orderId, decimal amountPaid)
+    {
+        var inbox = _fixture.Services.GetRequiredService<IInboxDispatcher>();
+        var paymentEvent = new PaymentConfirmedIntegrationEvent(
+            Guid.NewGuid(), orderId, amountPaid, $"PAY-{orderId:N}", DateTimeOffset.UtcNow, "USD");
+        var envelope = new IntegrationEnvelope(paymentEvent.EventId, paymentEvent) { MessageSource = "payments" };
+        await inbox.DispatchAsync(envelope, TestContext.Current.CancellationToken);
     }
 }

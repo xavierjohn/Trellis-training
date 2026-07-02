@@ -28,3 +28,9 @@ public sealed record OrderCancelledEvent(
     OrderId OrderId,
     OrderStatus CancelledFromStatus,
     DateTimeOffset OccurredAt) : IDomainEvent;
+
+/// <summary>Raised when an order's payment has been confirmed via <see cref="Order.RecordPayment"/>.</summary>
+public sealed record OrderPaidEvent(
+    OrderId OrderId,
+    PaymentRef PaymentReference,
+    DateTimeOffset OccurredAt) : IDomainEvent;
