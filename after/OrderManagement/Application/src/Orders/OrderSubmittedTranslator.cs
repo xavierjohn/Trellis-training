@@ -15,9 +15,9 @@ internal sealed class OrderSubmittedTranslator(IIntegrationEventCollector collec
     public ValueTask HandleAsync(OrderSubmittedEvent domainEvent, CancellationToken cancellationToken)
     {
         collector.Add(new OrderSubmittedIntegrationEvent(
-            DeterministicEventId.ForOrder(domainEvent.OrderId.Value, "submitted"),
-            domainEvent.OrderId.Value,
-            domainEvent.CustomerId.Value,
+            DeterministicEventId.ForOrder(domainEvent.OrderId, "submitted"),
+            domainEvent.OrderId,
+            domainEvent.CustomerId,
             domainEvent.OrderTotal,
             domainEvent.OccurredAt));
         return ValueTask.CompletedTask;

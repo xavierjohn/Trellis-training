@@ -15,9 +15,9 @@ internal sealed class OrderCancelledTranslator(IIntegrationEventCollector collec
     public ValueTask HandleAsync(OrderCancelledEvent domainEvent, CancellationToken cancellationToken)
     {
         collector.Add(new OrderCancelledIntegrationEvent(
-            DeterministicEventId.ForOrder(domainEvent.OrderId.Value, "cancelled"),
-            domainEvent.OrderId.Value,
-            domainEvent.CancelledFromStatus.Value,
+            DeterministicEventId.ForOrder(domainEvent.OrderId, "cancelled"),
+            domainEvent.OrderId,
+            domainEvent.CancelledFromStatus,
             domainEvent.OccurredAt));
         return ValueTask.CompletedTask;
     }

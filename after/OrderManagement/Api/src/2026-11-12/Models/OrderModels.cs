@@ -15,11 +15,11 @@ public record LineItemResponse
 
     public static LineItemResponse From(LineItem li) => new()
     {
-        Id = li.Id.Value,
-        ProductId = li.ProductId.Value,
-        ProductName = li.ProductName.Value,
-        Quantity = li.Quantity.Value,
-        UnitPrice = li.UnitPrice.Value,
+        Id = li.Id,
+        ProductId = li.ProductId,
+        ProductName = li.ProductName,
+        Quantity = li.Quantity,
+        UnitPrice = li.UnitPrice,
         LineTotal = li.LineTotal,
     };
 }
@@ -39,10 +39,10 @@ public record OrderResponse
 
     public static OrderResponse From(Order order) => new()
     {
-        Id = order.Id.Value,
-        CustomerId = order.CustomerId.Value,
-        CreatedByActorId = order.CreatedByActorId.Value,
-        Status = order.Status.Value,
+        Id = order.Id,
+        CustomerId = order.CustomerId,
+        CreatedByActorId = order.CreatedByActorId,
+        Status = order.Status,
         CreatedAt = order.CreatedAt,
         SubmittedAt = order.SubmittedAt.Match<DateTimeOffset?>(t => t, () => null),
         ShippedAt = order.ShippedAt.Match<DateTimeOffset?>(t => t, () => null),

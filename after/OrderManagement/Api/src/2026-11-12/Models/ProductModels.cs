@@ -13,11 +13,11 @@ public record ProductResponse
 
     public static ProductResponse From(Product product) => new()
     {
-        Id = product.Id.Value,
-        ProductName = product.ProductName.Value,
-        Sku = product.Sku.Value,
-        UnitPrice = product.UnitPrice.Value,
-        StockQuantity = product.StockQuantity.Value,
+        Id = product.Id,
+        ProductName = product.ProductName,
+        Sku = product.Sku,
+        UnitPrice = product.UnitPrice,
+        StockQuantity = product.StockQuantity,
     };
 }
 
