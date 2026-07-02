@@ -11,12 +11,20 @@ public interface IOrderRepository
     Task<Maybe<Order>> FindByIdAsync(OrderId id, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Returns all orders belonging to a customer. Used by the "list orders by customer" query.
+    /// Returns a bounded page of a customer's orders using forward-only cursor (keyset)
+    /// pagination ordered by the order's (time-ordered) id. Used by the "list orders by
+    /// customer" query. A malformed <paramref name="cursor"/> yields <c>Error.InvalidInput</c>.
     /// </summary>
-    Task<IReadOnlyList<Order>> ListByCustomerAsync(CustomerId customerId, CancellationToken cancellationToken);
+    Task<Result<Page<Order>>> ListByCustomerPageAsync(
+        CustomerId customerId, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken);
 
-    /// <summary>Returns all orders matching the supplied specification.</summary>
-    Task<IReadOnlyList<Order>> QueryAsync(Specification<Order> specification, CancellationToken cancellationToken);
+    /// <summary>
+    /// Returns a bounded page of orders matching the specification using forward-only cursor
+    /// (keyset) pagination ordered by the order's (time-ordered) id. A malformed
+    /// <paramref name="cursor"/> yields <c>Error.InvalidInput</c>.
+    /// </summary>
+    Task<Result<Page<Order>>> QueryPageAsync(
+        Specification<Order> specification, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken);
 
     /// <summary>Stages an aggregate for insertion. The unit-of-work commits on handler success.</summary>
     void Add(Order order);

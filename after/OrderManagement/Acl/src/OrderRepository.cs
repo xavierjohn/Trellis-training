@@ -10,14 +10,19 @@ internal sealed class OrderRepository : RepositoryBase<Order, OrderId>, IOrderRe
 {
     public OrderRepository(AppDbContext context) : base(context) { }
 
-    public async Task<IReadOnlyList<Order>> ListByCustomerAsync(CustomerId customerId, CancellationToken cancellationToken) =>
-        await DbSet
+    public Task<Result<Page<Order>>> ListByCustomerPageAsync(
+        CustomerId customerId, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken) =>
+        DbSet
             .Include(o => o.LineItems)
             .Where(o => o.CustomerId == customerId)
-            .ToListAsync(cancellationToken);
+            .ToPageAsync(pageSize, cursor, o => o.Id.Value, cancellationToken: cancellationToken);
 
-    public override async Task<IReadOnlyList<Order>> QueryAsync(Specification<Order> specification, CancellationToken cancellationToken) =>
-        await DbSet.Include(o => o.LineItems).Where(specification).ToListAsync(cancellationToken);
+    public Task<Result<Page<Order>>> QueryPageAsync(
+        Specification<Order> specification, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken) =>
+        DbSet
+            .Include(o => o.LineItems)
+            .Where(specification)
+            .ToPageAsync(pageSize, cursor, o => o.Id.Value, cancellationToken: cancellationToken);
 
     public override async Task<Maybe<Order>> FindByIdAsync(OrderId id, CancellationToken cancellationToken)
     {

@@ -53,16 +53,37 @@ internal sealed class FakeOrderRepository : IOrderRepository
     public Task<Maybe<Order>> FindByIdAsync(OrderId id, CancellationToken cancellationToken) =>
         _repo.FindByIdAsync(id, cancellationToken);
 
-    public Task<IReadOnlyList<Order>> ListByCustomerAsync(CustomerId customerId, CancellationToken cancellationToken)
-    {
-        IReadOnlyList<Order> result = _repo.GetAll().Where(o => o.CustomerId == customerId).ToList();
-        return Task.FromResult(result);
-    }
+    public Task<Result<Page<Order>>> ListByCustomerPageAsync(
+        CustomerId customerId, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken) =>
+        Task.FromResult(PageInMemory(_repo.GetAll().Where(o => o.CustomerId == customerId), pageSize, cursor));
 
-    public Task<IReadOnlyList<Order>> QueryAsync(Specification<Order> specification, CancellationToken cancellationToken) =>
-        _repo.QueryAsync(specification, cancellationToken);
+    public Task<Result<Page<Order>>> QueryPageAsync(
+        Specification<Order> specification, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken) =>
+        Task.FromResult(PageInMemory(_repo.GetAll().Where(specification.ToExpression().Compile()), pageSize, cursor));
 
     public void Add(Order order) => _repo.Add(order);
+
+    // Mirrors Trellis' EF ToPageAsync seek semantics in memory so fake-backed handler tests
+    // exercise the same cursor / limit / over-fetch behavior as the SQLite adapter.
+    private static Result<Page<Order>> PageInMemory(IEnumerable<Order> source, PageSize pageSize, Cursor? cursor)
+    {
+        Guid? afterId = null;
+        if (cursor is { } c)
+        {
+            var decoded = CursorCodec.TryDecode<Guid>(c);
+            if (!decoded.TryGetValue(out var id, out var error))
+                return Result.Fail<Page<Order>>(error);
+            afterId = id;
+        }
+
+        var overFetched = source
+            .OrderBy(o => o.Id.Value)
+            .Where(o => afterId is not Guid g || o.Id.Value.CompareTo(g) > 0)
+            .Take(pageSize.Applied + 1)
+            .ToList();
+
+        return Result.Ok(PageBuilder.FromOverFetch(overFetched, pageSize, o => o.Id.Value));
+    }
 }
 
 /// <summary>Fake resource loader for the OM ownership-checked Cancel flow.</summary>

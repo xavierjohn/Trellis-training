@@ -58,18 +58,28 @@ public class CustomersController : ControllerBase
     public IActionResult GetById(Guid id) => NotFound();
 
     /// <summary>
-    /// List every order belonging to a customer. <c>GET /api/customers/{id}/orders</c>
+    /// List a customer's orders as a bounded page. <c>GET /api/customers/{id}/orders</c>
     /// (spec §6.13). Requires <see cref="Permissions.OrdersReadAll"/>.
     /// </summary>
-    [HttpGet("{id}/orders")]
-    [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), StatusCodes.Status200OK)]
+    [HttpGet("{id}/orders", Name = "Customers_ListOrders")]
+    [ProducesResponseType(typeof(PagedResponse<OrderResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ValueTask<ActionResult<IReadOnlyList<OrderResponse>>> ListOrders(
+    public ValueTask<ActionResult<PagedResponse<OrderResponse>>> ListOrders(
         CustomerId id,
+        [FromQuery] string? cursor,
+        [FromQuery] int? limit,
         CancellationToken cancellationToken) =>
-        _sender.Send(new ListOrdersByCustomerQuery(id), cancellationToken)
-            .ToHttpResponseAsync(orders =>
-                (IReadOnlyList<OrderResponse>)orders.Select(OrderResponse.From).ToList())
-            .AsActionResultAsync<IReadOnlyList<OrderResponse>>();
+        _sender.Send(new ListOrdersByCustomerQuery(id, cursor, limit), cancellationToken)
+            .ToHttpResponseAsync(
+                HttpContext.PageUrl("Customers_ListOrders", (next, applied) =>
+                    new Microsoft.AspNetCore.Routing.RouteValueDictionary
+                    {
+                        ["id"] = id.Value,
+                        ["cursor"] = next.Token,
+                        ["limit"] = applied,
+                    }),
+                OrderResponse.From)
+            .AsActionResultAsync<PagedResponse<OrderResponse>>();
 }

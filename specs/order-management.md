@@ -292,17 +292,19 @@ All operations are implemented as Commands or Queries using CQRS.
 ### 6.13 List Orders by Customer (Query)
 
 - **Permission required:** `orders:read-all`
-- **Input:** customerId
-- **Behavior:** Verifies customer exists. Returns list of orders for the customer.
-- **Success:** Returns the list of Orders belonging to the Customer.
-- **Failure:** Customer not found → 404.
+- **Input:** customerId, optional `cursor`, optional `limit`
+- **Behavior:** Verifies customer exists. Returns a bounded page of the customer's orders using cursor (keyset) pagination ordered by the order's id (see §7.1).
+- **Success:** Returns a page of Orders belonging to the Customer, with a `next` cursor when more pages remain.
+- **Failure:** Customer not found → 404. Malformed `cursor` → 422.
 
 ### 6.14 List Overdue Orders (Query)
 
 - **Permission required:** `orders:read-all`
 - **Definition:** An order is overdue if it has been in Submitted status for more than 7 days without being Approved.
-- **Input:** none
-- **Success:** Returns the list of overdue Orders.
+- **Input:** optional `cursor`, optional `limit`
+- **Behavior:** Returns a bounded page of overdue orders using cursor (keyset) pagination ordered by the order's id (see §7.1).
+- **Success:** Returns a page of overdue Orders, with a `next` cursor when more pages remain.
+- **Failure:** Malformed `cursor` → 422.
 
 ## 7. API Endpoints
 
@@ -322,13 +324,25 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 | POST | /api/orders/{id}/delivery | Deliver Order | `orders:deliver` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/cancellation | Cancel Order | `orders:cancel` + ownership | 200 OK | 400, 403, 404 |
 | GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK | 403, 404 |
-| GET | /api/customers/{id}/orders | List Orders by Customer | `orders:read-all` | 200 OK | 403, 404 |
-| GET | /api/orders/overdue | List Overdue Orders | `orders:read-all` | 200 OK | 403 |
+| GET | /api/customers/{id}/orders | List Orders by Customer (paged) | `orders:read-all` | 200 OK | 403, 404, 422 |
+| GET | /api/orders/overdue | List Overdue Orders (paged) | `orders:read-all` | 200 OK | 403, 422 |
 
 - All requests must include `?api-version=2026-11-12` query parameter. Requests without a version return 400 Bad Request.
 - All requests must include authentication context via the `X-Test-Actor` header (see Section 5.5). Requests without authentication context use the default Admin actor.
 - POST /customers and POST /orders return 201 Created with a Location header pointing to the created resource.
 - A `/health` endpoint must be available for health checks.
+
+### 7.1 List Pagination
+
+Every list endpoint returns a **bounded page** — never an unbounded array (an unbounded list is a latent outage at scale):
+
+- **Query parameters:** an optional `limit` (the server clamps it to a maximum; a sensible default applies when omitted) and an optional opaque `cursor`.
+- **Ordering & paging:** cursor (keyset) pagination ordered by the order's id — a time-ordered UUID — used as a stable forward-only seek key; over-fetch by one to determine whether another page exists. Do **not** use OFFSET/skip.
+- **Response body:** a page envelope containing `items`, `next`/`previous` cursor links, `requestedLimit`, `appliedLimit`, `deliveredCount`, and `wasCapped`.
+- **Response headers:** an RFC 8288 `Link` header carrying `rel="next"` (and `rel="prev"` when a previous page exists).
+- **Errors:** a malformed `cursor` → 422 (per the framework's invalid-input mapping).
+
+Applies to `GET /api/orders/overdue` and `GET /api/customers/{id}/orders`.
 
 ## 8. Persistence
 
@@ -337,6 +351,7 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 - **Entities to persist:** Customer, Product, Order (with LineItems).
 - **Unique constraints:** Customer.Email, Product.SKU.
 - **Indexes:** Order by CustomerId. Order by Status + SubmittedAt (for overdue query performance).
+- **List pagination:** List endpoints page by cursor (keyset) using the order's id as the stable seek key (see §7.1); no OFFSET/skip.
 - **OrderStatus** stored as string.
 - **PhoneNumber** stored as nullable column.
 - **Database creation:** Use `EnsureCreated()` on startup in development mode. Do NOT use EF Core migrations — `EnsureCreated` is simpler for development and avoids migration conflicts on repeated runs.
@@ -387,7 +402,8 @@ HTTP round-trip tests using a test web application factory with SQLite in-memory
 - Full order lifecycle: create customer, create product, add stock, create order, submit, confirm payment, approve, ship, deliver
 - Cancel by non-owner → 403
 - Cancel by owner → 200
-- Overdue orders query → 200 with correct filtered list
+- Overdue orders query → 200 with a bounded page of the correctly filtered orders; a `limit` smaller than the total returns a `next` cursor, and following it returns the remaining orders with no duplicates or gaps
+- List orders by customer → 200 with a bounded page; a malformed `cursor` → 422
 - Missing api-version → 400
 - Health check → 200
 - Eventing: submitting an order captures an OrderSubmitted message in the outbox; a PaymentConfirmed event dispatched through the inbox unblocks approval; dispatching the same PaymentConfirmed event twice is de-duplicated by the inbox

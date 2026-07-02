@@ -55,16 +55,25 @@ public class OrdersController : ControllerBase
             .ToHttpResponseAsync(OrderResponse.From)
             .AsActionResultAsync<OrderResponse>();
 
-    /// <summary>List overdue orders. <c>GET /api/orders/overdue</c>.</summary>
-    [HttpGet("overdue")]
-    [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), StatusCodes.Status200OK)]
+    /// <summary>List overdue orders as a bounded page. <c>GET /api/orders/overdue</c>.</summary>
+    [HttpGet("overdue", Name = "Orders_GetOverdue")]
+    [ProducesResponseType(typeof(PagedResponse<OrderResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public ValueTask<ActionResult<IReadOnlyList<OrderResponse>>> GetOverdue(
+    public ValueTask<ActionResult<PagedResponse<OrderResponse>>> GetOverdue(
+        [FromQuery] string? cursor,
+        [FromQuery] int? limit,
         CancellationToken cancellationToken) =>
-        _sender.Send(new ListOverdueOrdersQuery(), cancellationToken)
-            .ToHttpResponseAsync(orders =>
-                (IReadOnlyList<OrderResponse>)orders.Select(OrderResponse.From).ToList())
-            .AsActionResultAsync<IReadOnlyList<OrderResponse>>();
+        _sender.Send(new ListOverdueOrdersQuery(cursor, limit), cancellationToken)
+            .ToHttpResponseAsync(
+                HttpContext.PageUrl("Orders_GetOverdue", (next, applied) =>
+                    new Microsoft.AspNetCore.Routing.RouteValueDictionary
+                    {
+                        ["cursor"] = next.Token,
+                        ["limit"] = applied,
+                    }),
+                OrderResponse.From)
+            .AsActionResultAsync<PagedResponse<OrderResponse>>();
 
     /// <summary>Add a line item to a draft order. <c>POST /api/orders/{id}/line-items</c>.</summary>
     [HttpPost("{id}/line-items")]
