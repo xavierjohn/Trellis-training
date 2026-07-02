@@ -1,152 +1,206 @@
-### Create a todo (admin)
-# Idempotency-Key opts this POST into the IETF idempotency middleware;
-# {{$guid}} generates a fresh key per call so retries are not replayed.
-# dueDate is computed at request time so the example never goes stale.
-# @name createTodo
-POST {{host}}/api/Todos?api-version={{apiVersion}}
-Content-Type: application/json
-Idempotency-Key: {{$guid}}
-X-Test-Actor: {{adminActor}}
-
-{
-  "title": "Buy groceries",
-  "dueDate": "{{$datetime iso8601 30 d}}",
-  "tag": "shopping"
-}
-
-### Create a todo without tag
-POST {{host}}/api/Todos?api-version={{apiVersion}}
-Content-Type: application/json
-Idempotency-Key: {{$guid}}
-X-Test-Actor: {{adminActor}}
-
-{
-  "title": "Finish quarterly report",
-  "dueDate": "{{$datetime iso8601 14 d}}"
-}
-
-### Get todo by ID
-GET {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
-Accept: application/json
-X-Test-Actor: {{userActor}}
-
-### Get overdue todos
-GET {{host}}/api/Todos/overdue?api-version={{apiVersion}}
-Accept: application/json
-X-Test-Actor: {{userActor}}
-
-### Update todo (PUT — body-overwriting mutation, requires If-Match)
-PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-If-Match: {{createTodo.response.headers.ETag}}
-
-{
-  "title": "Buy organic groceries",
-  "dueDate": "{{$datetime iso8601 45 d}}",
-  "tag": "health"
-}
-
-### Update todo with past due date (→ 422 from DueDate value-object validation)
-PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
-Content-Type: application/json
-X-Test-Actor: {{adminActor}}
-If-Match: {{createTodo.response.headers.ETag}}
-
-{
-  "title": "Too late",
-  "dueDate": "2020-01-01T12:00:00Z"
-}
-
-### Complete todo (by creator) — body-less state-transition POST, no If-Match required
-POST {{host}}/api/Todos/{{createTodo.response.body.id}}/complete?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### Complete todo (by non-creator → 403 Forbidden via IAuthorize)
-POST {{host}}/api/Todos/{{createTodo.response.body.id}}/complete?api-version={{apiVersion}}
-X-Test-Actor: {{userActor}}
-
-### Complete an already-completed todo (→ 422 from state machine guard)
-# Run the "Complete todo (by creator)" request above first, then this one.
-POST {{host}}/api/Todos/{{createTodo.response.body.id}}/complete?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-
-### Delete todo (requires If-Match — destructive mutation)
-# NOTE: after Update + Complete above, createTodo's ETag is stale; copy the latest
-# ETag from a fresh GET response into this If-Match header before sending, or this
-# request will return 412 Precondition Failed.
-DELETE {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
-X-Test-Actor: {{adminActor}}
-If-Match: {{createTodo.response.headers.ETag}}
-
-### Get deleted todo (→ 404)
-GET {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
-Accept: application/json
-X-Test-Actor: {{userActor}}
-
-### Bad Request — empty title (→ 422 from Title value-object validation)
-POST {{host}}/api/Todos?api-version={{apiVersion}}
-Content-Type: application/json
-Idempotency-Key: {{$guid}}
-X-Test-Actor: {{adminActor}}
-
-{
-  "title": "",
-  "dueDate": "{{$datetime iso8601 30 d}}"
-}
-
-### Bad Request — invalid tag (→ 422 from Tag value-object validation)
-POST {{host}}/api/Todos?api-version={{apiVersion}}
-Content-Type: application/json
-Idempotency-Key: {{$guid}}
-X-Test-Actor: {{adminActor}}
-
-{
-  "title": "Test invalid tag",
-  "dueDate": "{{$datetime iso8601 30 d}}",
-  "tag": "INVALID TAG"
-}
-
-### Not Found — nonexistent todo (→ 404 with ResourceRef)
-GET {{host}}/api/Todos/00000000-0000-0000-0000-000000000001?api-version={{apiVersion}}
-Accept: application/json
-X-Test-Actor: {{userActor}}
-
-### Throw — demonstrates the ASP.NET exception handling pipeline (UseExceptionHandler + ProblemDetails)
-GET {{host}}/api/Todos/throw?api-version={{apiVersion}}
-Accept: application/json
-
-### Fault — demonstrates Error.Unexpected mapping with a stable fault id (no exception thrown)
-GET {{host}}/api/Todos/fault?api-version={{apiVersion}}
-Accept: application/json
-
 ###############################################
-# RFC 9110 — Conditional Request Examples
+# Order Management API — sample requests
+#
+# Variables (host, apiVersion, adminActor, userActor) come from http-client.env.json.
+# This file is replayed as an integration test (ApiHttpReplayTests, via HttpFileRunner),
+# so keep the "# @expect" pragmas in sync with the API.
 ###############################################
 
-### GET with If-None-Match — 304 Not Modified when ETag matches
-GET {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
-Accept: application/json
-X-Test-Actor: {{userActor}}
-If-None-Match: {{createTodo.response.headers.ETag}}
-
-### PUT with stale If-Match — 412 Precondition Failed
-PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+### Create a customer (admin)
+# @name customer
+# @expect status: 201
+POST {{host}}/api/customers?api-version={{apiVersion}}
 Content-Type: application/json
 X-Test-Actor: {{adminActor}}
-If-Match: "stale-etag-value"
 
 {
-  "title": "This should fail",
-  "dueDate": "{{$datetime iso8601 30 d}}"
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "email": "ada.http@example.com",
+  "shippingAddress": {
+    "street": "1 Compute Way",
+    "city": "Palo Alto",
+    "state": "CA",
+    "postalCode": "94301",
+    "country": "USA"
+  }
 }
 
-### PUT without If-Match — 428 Precondition Required (RequireETag fires on missing header)
-PUT {{host}}/api/Todos/{{createTodo.response.body.id}}?api-version={{apiVersion}}
+### Create a product (admin)
+# @name product
+# @expect status: 201
+POST {{host}}/api/products?api-version={{apiVersion}}
 Content-Type: application/json
 X-Test-Actor: {{adminActor}}
 
 {
-  "title": "Missing If-Match",
-  "dueDate": "{{$datetime iso8601 30 d}}"
+  "productName": "Widget",
+  "sku": "SKUHTTP001",
+  "unitPrice": 9.99
+}
+
+### Add stock to the product (admin)
+# @expect status: 200
+POST {{host}}/api/products/{{product.response.body.id}}/stock-additions?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "quantity": 100
+}
+
+### Create a second product (admin) — used to add a distinct line item below
+# @name product2
+# @expect status: 201
+POST {{host}}/api/products?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "productName": "Gadget",
+  "sku": "SKUHTTP002",
+  "unitPrice": 4.50
+}
+
+### Add stock to the second product (admin)
+# @expect status: 200
+POST {{host}}/api/products/{{product2.response.body.id}}/stock-additions?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "quantity": 100
+}
+
+### Create draft order A (admin)
+# @name orderA
+# @expect status: 201
+POST {{host}}/api/orders?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "customerId": "{{customer.response.body.id}}",
+  "lineItems": [
+    { "productId": "{{product.response.body.id}}", "quantity": 1 }
+  ]
+}
+
+### Create draft order B (admin) — extra orders so the customer list spans multiple pages
+# @expect status: 201
+POST {{host}}/api/orders?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "customerId": "{{customer.response.body.id}}",
+  "lineItems": [
+    { "productId": "{{product.response.body.id}}", "quantity": 2 }
+  ]
+}
+
+### Create draft order C (admin)
+# @expect status: 201
+POST {{host}}/api/orders?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "customerId": "{{customer.response.body.id}}",
+  "lineItems": [
+    { "productId": "{{product.response.body.id}}", "quantity": 3 }
+  ]
+}
+
+### Get order A by id (admin)
+# @expect status: 200
+GET {{host}}/api/orders/{{orderA.response.body.id}}?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{adminActor}}
+
+### Add a line item (a different product) to draft order A (admin)
+# @expect status: 200
+POST {{host}}/api/orders/{{orderA.response.body.id}}/line-items?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "productId": "{{product2.response.body.id}}",
+  "quantity": 4
+}
+
+### Submit order A (admin) — body-less state transition
+# @expect status: 200
+POST {{host}}/api/orders/{{orderA.response.body.id}}/submission?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### Approve order A before payment is confirmed (→ 422)
+# The order can only be approved once a PaymentConfirmed integration event has arrived
+# (via the eventing pipeline / the Development payment simulator on a live server), so
+# approving straight after submission is rejected by the payment gate.
+# @expect status: 422
+POST {{host}}/api/orders/{{orderA.response.body.id}}/approval?api-version={{apiVersion}}
+X-Test-Actor: {{adminActor}}
+
+### List the customer's orders — page 1 (bounded page; a Link header carries the next cursor)
+# @name page1
+# @expect status: 200
+# @expect header: Link
+GET {{host}}/api/customers/{{customer.response.body.id}}/orders?api-version={{apiVersion}}&limit=2
+Accept: application/json
+X-Test-Actor: {{adminActor}}
+
+### List the customer's orders — page 2 (follow the cursor emitted by page 1)
+# @expect status: 200
+GET {{host}}/api/customers/{{customer.response.body.id}}/orders?api-version={{apiVersion}}&limit=2&cursor={{page1.response.body.next.cursor}}
+Accept: application/json
+X-Test-Actor: {{adminActor}}
+
+### List overdue orders — bounded page (none are overdue here, still 200)
+# @expect status: 200
+GET {{host}}/api/orders/overdue?api-version={{apiVersion}}&limit=10
+Accept: application/json
+X-Test-Actor: {{adminActor}}
+
+### Malformed pagination cursor (→ 422)
+# @expect status: 422
+GET {{host}}/api/customers/{{customer.response.body.id}}/orders?api-version={{apiVersion}}&cursor=not-a-valid-cursor
+Accept: application/json
+X-Test-Actor: {{adminActor}}
+
+### Read order A as a limited user (orders:read is enough → 200)
+# @expect status: 200
+GET {{host}}/api/orders/{{orderA.response.body.id}}?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{userActor}}
+
+### List a customer's orders as a limited user (needs orders:read-all → 403)
+# @expect status: 403
+GET {{host}}/api/customers/{{customer.response.body.id}}/orders?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{userActor}}
+
+### Get a nonexistent order (→ 404)
+# @expect status: 404
+GET {{host}}/api/orders/11111111-1111-1111-1111-111111111111?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{adminActor}}
+
+### Create a customer with a duplicate email (→ 409)
+# @expect status: 409
+POST {{host}}/api/customers?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+
+{
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "email": "ada.http@example.com",
+  "shippingAddress": {
+    "street": "1 Compute Way",
+    "city": "Palo Alto",
+    "state": "CA",
+    "postalCode": "94301",
+    "country": "USA"
+  }
 }
