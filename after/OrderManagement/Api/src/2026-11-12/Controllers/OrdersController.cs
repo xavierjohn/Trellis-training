@@ -48,6 +48,7 @@ public class OrdersController : ControllerBase
     [HttpGet("{id}", Name = "Orders_GetById")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status304NotModified)]
+    [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<OrderResponse>> GetById(
@@ -94,7 +95,9 @@ public class OrdersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status428PreconditionRequired)]
     public ValueTask<ActionResult<OrderResponse>> AddLineItem(
         OrderId id,

@@ -38,7 +38,7 @@ public class ConcurrencyTests
     }
 
     [Fact]
-    public async Task AddLineItem_RequiresIfMatch_428Missing_412Stale_200Fresh()
+    public async Task AddLineItem_Enforces_IdempotencyKey_And_IfMatch_400_428_412_200()
     {
         var client = _fixture.CreateClient();
         var ct = TestContext.Current.CancellationToken;
@@ -47,7 +47,13 @@ public class ConcurrencyTests
         var orderId = (await CreateOrderAsync(client, customerId, productId, ct)).Id;
 
         var get = await client.GetAsync($"/api/orders/{orderId}?api-version={ApiVersion}", ct);
+        get.StatusCode.Should().Be(HttpStatusCode.OK);
+        get.Headers.ETag.Should().NotBeNull();
         var etag = get.Headers.ETag!;
+
+        // No Idempotency-Key → 400 (the idempotency middleware requires it).
+        var noKey = await client.SendAsync(AddLineItem(orderId, product2Id, etag, includeIdempotencyKey: false), ct);
+        noKey.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
         // No If-Match → 428 Precondition Required.
         var missing = await client.SendAsync(AddLineItem(orderId, product2Id, ifMatch: null), ct);
@@ -74,6 +80,8 @@ public class ConcurrencyTests
         var orderId = (await CreateOrderAsync(client, customerId, productId, ct)).Id;
 
         var get = await client.GetAsync($"/api/orders/{orderId}?api-version={ApiVersion}", ct);
+        get.StatusCode.Should().Be(HttpStatusCode.OK);
+        get.Headers.ETag.Should().NotBeNull();
         var etag = get.Headers.ETag!;
         var key = Guid.NewGuid().ToString("N");
 
@@ -89,7 +97,7 @@ public class ConcurrencyTests
         final!.LineItems.Count(li => li.ProductId == product2Id).Should().Be(1);
     }
 
-    private static HttpRequestMessage AddLineItem(Guid orderId, Guid productId, EntityTagHeaderValue? ifMatch, string? idempotencyKey = null)
+    private static HttpRequestMessage AddLineItem(Guid orderId, Guid productId, EntityTagHeaderValue? ifMatch, string? idempotencyKey = null, bool includeIdempotencyKey = true)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/orders/{orderId}/line-items?api-version={ApiVersion}")
         {
@@ -97,7 +105,8 @@ public class ConcurrencyTests
         };
         if (ifMatch is not null)
             request.Headers.IfMatch.Add(ifMatch);
-        request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey ?? Guid.NewGuid().ToString("N"));
+        if (includeIdempotencyKey)
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey ?? Guid.NewGuid().ToString("N"));
         return request;
     }
 

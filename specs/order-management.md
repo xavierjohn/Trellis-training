@@ -232,7 +232,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Concurrency & retries:** Requires an `If-Match` ETag (optimistic concurrency) **and** an `Idempotency-Key` header (retry-safe writes); see §7.2.
 - **Behavior:** Order must be in Draft status. Product must not already be in the order. Unit price is captured from the product.
 - **Success:** Returns the updated Order (with a new `ETag`) and the new line item.
-- **Failure:** Validation error (not Draft, duplicate product, invalid quantity) → 400. Order or product not found → 404. Missing `If-Match` → 428; stale `If-Match` → 412.
+- **Failure:** Validation error (not Draft, duplicate product, invalid quantity) → 400. Order or product not found → 404. Missing `If-Match` → 428; stale `If-Match` → 412. Missing `Idempotency-Key` → 400; a still-in-flight retry → 409; a key reused with a different body → 422.
 
 ### 6.6 Remove Line Item from Draft Order (Command)
 
@@ -289,7 +289,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId, optional `If-None-Match`
 - **Behavior:** Emits a strong `ETag` (and `Last-Modified`) and honors `If-None-Match` (see §7.2).
 - **Success:** Returns the Order with an `ETag` header — or `304 Not Modified` (no body) when `If-None-Match` matches the current ETag.
-- **Failure:** Order not found → 404.
+- **Failure:** Order not found → 404. A supplied `If-Match`/`If-Unmodified-Since` precondition that fails → 412.
 
 ### 6.13 List Orders by Customer (Query)
 
@@ -318,14 +318,14 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 | POST | /api/products | Create Product | `products:create` | 201 Created | 400, 403, 409 |
 | POST | /api/products/{id}/stock-additions | Add Stock | `products:manage-stock` | 200 OK | 400, 403, 404 |
 | POST | /api/orders | Create Draft Order | `orders:create` | 201 Created | 400, 403, 404 |
-| POST | /api/orders/{id}/line-items | Add Line Item | `orders:create` | 200 OK | 400, 403, 404, 412, 428 |
+| POST | /api/orders/{id}/line-items | Add Line Item | `orders:create` | 200 OK | 400, 403, 404, 409, 412, 422, 428 |
 | DELETE | /api/orders/{id}/line-items/{lineItemId} | Remove Line Item | `orders:create` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/submission | Submit Order | `orders:submit` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/approval | Approve Order | `orders:approve` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/shipment | Ship Order | `orders:ship` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/delivery | Deliver Order | `orders:deliver` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/cancellation | Cancel Order | `orders:cancel` + ownership | 200 OK | 400, 403, 404 |
-| GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK / 304 | 403, 404 |
+| GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK / 304 | 403, 404, 412 |
 | GET | /api/customers/{id}/orders | List Orders by Customer (paged) | `orders:read-all` | 200 OK | 403, 404, 422 |
 | GET | /api/orders/overdue | List Overdue Orders (paged) | `orders:read-all` | 200 OK | 403, 422 |
 
@@ -350,9 +350,9 @@ Applies to `GET /api/orders/overdue` and `GET /api/customers/{id}/orders`.
 
 Reads and writes use HTTP entity tags (ETags) for optimistic concurrency and conditional requests (RFC 9110). The ETag is the aggregate's version stamp; a client obtains it from a read (or write) response and echoes it back to guard against lost updates:
 
-- **Reads** — `GET /api/orders/{id}` emits a strong `ETag` (and `Last-Modified`). A request with `If-None-Match` carrying the current ETag returns `304 Not Modified` with no body.
+- **Reads** — `GET /api/orders/{id}` emits a strong `ETag` (and `Last-Modified`). A request with `If-None-Match` carrying the current ETag returns `304 Not Modified` with no body; a read that supplies `If-Match`/`If-Unmodified-Since` and fails that precondition returns `412 Precondition Failed`.
 - **Writes** — `POST /api/orders/{id}/line-items` requires an `If-Match` ETag: a missing header → `428 Precondition Required`; an ETag that no longer matches the order → `412 Precondition Failed`. On success the response carries the new `ETag`.
-- **Idempotent writes** — `POST /api/orders/{id}/line-items` also requires an `Idempotency-Key` header (a missing key → `400`). Retrying with the same key replays the original response instead of applying the change twice, so a network retry can't add the line item twice.
+- **Idempotent writes** — `POST /api/orders/{id}/line-items` also requires an `Idempotency-Key` header (a missing key → `400`). Retrying with the same key replays the original response instead of applying the change twice. While the first request is still in flight a same-key retry gets `409 Conflict` (with `Retry-After`); reusing a key with a different request body gets `422 Unprocessable Entity`.
 
 ## 8. Persistence
 
