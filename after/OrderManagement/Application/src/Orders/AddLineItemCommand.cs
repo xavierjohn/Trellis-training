@@ -7,7 +7,8 @@ using OrderManagement.Domain;
 using Trellis.Authorization;
 
 /// <summary>Adds a line item to a draft order.</summary>
-public sealed record AddLineItemCommand(OrderId OrderId, ProductId ProductId, LineItemQuantity Quantity)
+public sealed record AddLineItemCommand(
+    OrderId OrderId, ProductId ProductId, LineItemQuantity Quantity, EntityTagValue[]? IfMatchETags = null)
     : ICommand<Result<Order>>, IAuthorize
 {
     /// <inheritdoc />
@@ -41,6 +42,12 @@ public sealed class AddLineItemCommandHandler : ICommandHandler<AddLineItemComma
         if (!orderMaybe.TryGetValue(out var order))
             return Result.Fail<Order>(new Error.NotFound(ResourceRef.For<Order>(command.OrderId))
             { Detail = $"Order {command.OrderId} not found." });
+
+        // Optimistic concurrency: If-Match is required. RequireETag yields 428 when the caller
+        // sent no validator and 412 when the supplied ETag no longer matches the loaded order.
+        var precondition = Result.Ok(order).RequireETag(command.IfMatchETags);
+        if (precondition.IsFailure)
+            return precondition;
 
         var productMaybe = await _productRepository.FindByIdAsync(command.ProductId, cancellationToken);
         if (!productMaybe.TryGetValue(out var product))

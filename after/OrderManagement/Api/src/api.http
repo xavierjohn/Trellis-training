@@ -112,21 +112,70 @@ X-Test-Actor: {{adminActor}}
   ]
 }
 
-### Get order A by id (admin)
+### Get order A by id (admin) — capture the ETag for conditional requests
+# @name orderView
 # @expect status: 200
+# @expect header: ETag
 GET {{host}}/api/orders/{{orderA.response.body.id}}?api-version={{apiVersion}}
 Accept: application/json
 X-Test-Actor: {{adminActor}}
 
-### Add a line item (a different product) to draft order A (admin)
-# @expect status: 200
+### Conditional GET with If-None-Match — unchanged resource returns 304 Not Modified
+# @expect status: 304
+GET {{host}}/api/orders/{{orderA.response.body.id}}?api-version={{apiVersion}}
+Accept: application/json
+X-Test-Actor: {{adminActor}}
+If-None-Match: {{orderView.response.headers.ETag}}
+
+### Add a line item WITHOUT If-Match — optimistic concurrency requires it (428)
+# @expect status: 428
 POST {{host}}/api/orders/{{orderA.response.body.id}}/line-items?api-version={{apiVersion}}
 Content-Type: application/json
 X-Test-Actor: {{adminActor}}
+Idempotency-Key: http-add-missing-ifmatch
 
 {
   "productId": "{{product2.response.body.id}}",
   "quantity": 4
+}
+
+### Add a line item (a different product) with a matching If-Match + Idempotency-Key (200)
+# @expect status: 200
+POST {{host}}/api/orders/{{orderA.response.body.id}}/line-items?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+If-Match: {{orderView.response.headers.ETag}}
+Idempotency-Key: http-add-fresh
+
+{
+  "productId": "{{product2.response.body.id}}",
+  "quantity": 4
+}
+
+### Retry the SAME add with the SAME Idempotency-Key — replayed, not applied twice (200)
+# @expect status: 200
+POST {{host}}/api/orders/{{orderA.response.body.id}}/line-items?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+If-Match: {{orderView.response.headers.ETag}}
+Idempotency-Key: http-add-fresh
+
+{
+  "productId": "{{product2.response.body.id}}",
+  "quantity": 4
+}
+
+### Add a line item again with the now-stale If-Match — 412 Precondition Failed
+# @expect status: 412
+POST {{host}}/api/orders/{{orderA.response.body.id}}/line-items?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+If-Match: {{orderView.response.headers.ETag}}
+Idempotency-Key: http-add-stale
+
+{
+  "productId": "{{product.response.body.id}}",
+  "quantity": 1
 }
 
 ### Submit order A (admin) — body-less state transition
