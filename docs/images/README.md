@@ -42,7 +42,7 @@ Regenerate with [`gen_order_lifecycle.py`](gen_order_lifecycle.py) (`python docs
 ### 4. `before-after.png` (700×400)
 **Used in:** README.md "Study the reference implementation" section
 **Concept:** Split-screen comparison:
-- **Left side** labeled "Before (Template)" — shows a simple project tree with sample WeatherForecast code, faded/gray tone
+- **Left side** labeled "Before (Template)" — shows a simple project tree with the sample Todo code, faded/gray tone
 - **Right side** labeled "After (AI-Generated)" — shows the full Order Management project tree with real domain types, vibrant/colorful tone
 - Visual arrow or transform icon between them
 - Emphasize the transformation from boilerplate to real enterprise code
@@ -58,20 +58,7 @@ Each step as a numbered circle inside a card, connected by arrows. Steps 4 and 8
 
 Regenerate with [`gen_step_flow.py`](gen_step_flow.py) (`python docs/images/gen_step_flow.py`).
 
-### 6. `evaluation-radar.png` (landscape, displayed at width 500)
-**Used in:** README.md "Also a benchmark" section
-**Concept:** Radar/spider chart with 5 axes, each normalized so the outer ring is full marks:
-- L1: Structural (18 pts)
-- L2: Behavioral (13 pts)
-- L3: Architecture (13 pts)
-- L4: Tests (9 pts)
-- L5: Feedback (4 pts)
-
-Overlay one polygon per model in the current alpha.360 cohort — Opus 4.8, Sonnet 4.6, Opus 4.7 1M, GPT-5.5, and Haiku 4.5 — with a legend showing each model's total score. The four PASS models cluster near the outer ring; Haiku 4.5 (the only FAIL) visibly pulls in on L3 and L5.
-
-Regenerate with [`gen_radar.py`](gen_radar.py) (`python docs/images/gen_radar.py`); source data is the "Current cohort" table in [`results/evaluation-results.md`](../../results/evaluation-results.md).
-
-### 7. `aspire-dashboard.png` (700×400)
+### 6. `aspire-dashboard.png` (700×400)
 **Used in:** README.md "Observability" section
 **Concept:** Screenshot or stylized mockup of the .NET Aspire Dashboard showing:
 - Distributed traces for an Order Management API call chain
@@ -81,7 +68,7 @@ Regenerate with [`gen_radar.py`](gen_radar.py) (`python docs/images/gen_radar.py
 
 **Note:** This is best as an actual screenshot. Run the service, execute a few API calls, then screenshot the traces view.
 
-### 8. `scalar-api-docs.png` (700×400)
+### 7. `scalar-api-docs.png` (700×400)
 **Used in:** README.md "Observability" section
 **Concept:** Screenshot or stylized mockup of Scalar API documentation showing:
 - The Order Management API endpoints listed
@@ -91,7 +78,7 @@ Regenerate with [`gen_radar.py`](gen_radar.py) (`python docs/images/gen_radar.py
 
 **Note:** Best as an actual screenshot from `https://localhost:7011/scalar/2026-11-12` after running the service.
 
-### 9. `rop-pipeline.png` (landscape, displayed at width 600)
+### 8. `rop-pipeline.png` (landscape, displayed at width 600)
 **Used in:** README.md "Study the reference implementation" section
 **Concept:** Railway-oriented programming visualization based on the OM `SubmitOrder` handler. Two parallel tracks (success on top, failure on the bottom):
 ```
@@ -104,7 +91,7 @@ Each step returns a `Result`; the first failure short-circuits onto the failure 
 
 Authored as a standalone infographic (not script-generated) — update the PNG directly if the handler shape changes.
 
-### 10. `trellis-concepts.png` (landscape ~16:9, displayed at width 780)
+### 9. `trellis-concepts.png` (landscape ~16:9, displayed at width 780)
 **Used in:** docs/training-lab.md "Core Trellis concepts you'll meet" section
 **Concept:** A left-to-right concept map — "The Trellis Building Blocks" — grouping the framework's core pieces into four columns: **Foundation** (`Result<T>` / Railway-Oriented Programming, `Maybe<T>`), **Domain Modeling** (value objects, aggregates & entities, specifications, state machine), **Application** (Commands / Queries → a Mediator Pipeline pill: Validation → Authorization → Unit of Work), and **Boundaries** (Clean Architecture `API → ACL → Application → Domain`, EF Core conventions, Authorization). A `Trellis.Testing` tag underneath verifies the whole flow, with a red "errors short-circuit (ROP)" side-rail beneath. Keep the Clean Architecture arrow pointing inward (`API → ACL → Application → Domain`).
 

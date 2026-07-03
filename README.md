@@ -14,7 +14,7 @@
 
 Pick a business spec, hand it to an AI (GitHub Copilot or any model you like), and watch it build a complete service on Trellis. Then **read it, run it, and review it** against a checklist. You walk away understanding how a real Trellis service is shaped — Clean Architecture layers, Railway-Oriented error handling, value objects, state machines, versioned APIs, and EF Core conventions — without staring at a blank page.
 
-> 🧪 **It doubles as a benchmark.** Because every lab is scored against the same rubric, running it across different AI models also measures how consistently Trellis steers them. That's a handy side effect — see [Also a benchmark](#also-a-benchmark-measuring-ai-consistency) — but if you're here to **learn Trellis, jump straight to [Quick Start](#quick-start).**
+> 🧪 **Curious whether Trellis actually changes what an AI produces?** That's a separate, framework-neutral study — see **[trellis-ai-benchmark](https://github.com/xavierjohn/trellis-ai-benchmark)**. This repo is for **learning by doing** — jump to [Quick Start](#quick-start).
 
 ---
 
@@ -108,7 +108,7 @@ Each lab targets a different **system shape**, so you learn how Trellis handles 
 
 Want to read idiomatic Trellis code without running anything? Two complete copies of the Order Management lab are checked in:
 
-- **[`before/OrderManagement/`](before/OrderManagement/)** — the template scaffold you start from (the sample `WeatherForecast` service).
+- **[`before/OrderManagement/`](before/OrderManagement/)** — the template scaffold you start from (what `dotnet new trellis-asp` gives you: a small sample **Todo** service).
 - **[`after/OrderManagement/`](after/OrderManagement/)** — a complete, passing reference implementation. Start in `Domain/src/` (value objects, aggregates, the order state machine) and follow the layers outward through `Application/src/`, `Acl/src/`, and `Api/src/`.
 
 <p align="center">
@@ -135,42 +135,6 @@ The HTTP labs serve interactive API docs via Scalar:
   <img src="docs/images/scalar-api-docs.png" alt="Scalar API documentation — interactive OpenAPI explorer" width="700"/>
 </p>
 
-## Also a benchmark: measuring AI consistency
-
-The training lab has a useful side effect. Because every lab is scored against the same per-lab checklist, running a spec across **different AI models** measures whether Trellis constrains them into the *same* architecture, patterns, and error handling.
-
-You're **not** measuring whether AI can write code — you're measuring whether **Trellis is a tight enough framework** that independent runs converge. Where runs diverge, Trellis needs a tighter building block; where divergence is consistent across labs, the framework has a structural gap. Keeping the corpus heterogeneous (HTTP CRUD, worker, redirect host, …) keeps that signal from being biased toward whatever lab was written first.
-
-### Scoring
-
-The OM lab uses a 57-criteria rubric across five levels:
-
-| Level | What it measures | OM rows |
-|-------|-----------------|---------|
-| **L1: Structural** | Are the right types, patterns, and building blocks present? | 18 |
-| **L2: Behavioral** | Does the business logic work correctly? | 13 |
-| **L3: Architecture** | Is the API, DI, and infrastructure correct? | 13 |
-| **L4: Tests** | Are domain, integration, and auth tests comprehensive? | 9 |
-| **L5: Feedback** | Did the AI produce useful framework feedback? | 4 |
-
-**Passing score (OM lab): 52+/57.** Per-lab thresholds live in each operator guide.
-
-<p align="center">
-  <img src="docs/images/evaluation-radar.png" alt="Evaluation radar — L1 Structural, L2 Behavioral, L3 Architecture, L4 Tests, L5 Feedback" width="500"/>
-</p>
-
-### Order Management baselines — Trellis `3.0.0-alpha.360`
-
-| AI Model | Score | Verdict |
-|----------|-------|---------|
-| Claude Opus 4.8 | 56/57 (98%) | **PASS** |
-| Claude Sonnet 4.6 | 56/57 (98%) | **PASS** |
-| Claude Opus 4.7 (1M ctx) | 55/57 (96%) | **PASS** |
-| GPT-5.5 | 54/57 (95%) | **PASS** |
-| Claude Haiku 4.5 | 43/57 (75%) | **FAIL** |
-
-The reference run checked into [`after/OrderManagement/`](after/OrderManagement/) is the Opus 4.7 1M result. Full per-model scorecards (with criterion-by-criterion findings and the rubric's change history) live in **[results/evaluation-results.md](results/evaluation-results.md)**; recurring mistake patterns are tracked in **[results/ai-mistakes-log.md](results/ai-mistakes-log.md)**.
-
 ## Repository Structure
 
 ```
@@ -187,9 +151,6 @@ Trellis-training/
 │   ├── coverage-checklist-subscription-reminder.md
 │   ├── url-shortener.md
 │   └── coverage-checklist-url-shortener.md
-├── results/
-│   ├── evaluation-results.md                            # Historical scorecards (OM lab)
-│   └── ai-mistakes-log.md                               # Common mistake patterns
 ├── before/
 │   └── OrderManagement/                                 # Template scaffold (what you start with)
 └── after/
@@ -201,8 +162,9 @@ Trellis-training/
 - [`xavierjohn/Trellis`](https://github.com/xavierjohn/Trellis) — the framework you're learning: `Result<T>`, `Maybe<T>`, value objects, DDD primitives, ASP.NET / EF Core / Mediator integration.
 - [`xavierjohn/Trellis.AspTemplate`](https://github.com/xavierjohn/Trellis.AspTemplate) — `dotnet new trellis-asp` single-service Clean Architecture template used by the OM, worker, and URL-shortener labs.
 - [`xavierjohn/Trellis.Microservices`](https://github.com/xavierjohn/Trellis.Microservices) — microservice trust-boundary packages: YARP gateway + consumer-side actor provider.
-- [`xavierjohn/Trellis.Microservices.Template`](https://github.com/xavierjohn/Trellis.Microservices.Template) — `dotnet new trellis-microservices` multi-service Project Tracker template. A future multi-service lab will benchmark AI consistency across the gateway + downstream services topology.
+- [`xavierjohn/Trellis.Microservices.Template`](https://github.com/xavierjohn/Trellis.Microservices.Template) — `dotnet new trellis-microservices` multi-service Project Tracker template. A future multi-service lab will exercise the gateway + downstream-services topology.
 - [`xavierjohn/Trellis.ServiceLevelIndicators`](https://github.com/xavierjohn/Trellis.ServiceLevelIndicators) — latency SLI metrics library. The OM and URL-shortener labs already emit `Trellis.SLI`-shaped metrics via the framework's middleware.
+- [`xavierjohn/trellis-ai-benchmark`](https://github.com/xavierjohn/trellis-ai-benchmark) — the framework-neutral "does adopting Trellis change AI output?" study: the same spec built with and without Trellis, scored on outcomes.
 
 ## License
 

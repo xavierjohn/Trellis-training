@@ -3,7 +3,7 @@ package: Trellis.Authorization
 namespaces: [Trellis.Authorization]
 types: [Actor, ActorAttributes, ActorId, IActorProvider, IAuthorize, "IAuthorizeResource<TResource>", "IAuthorizeResourceVia<TOwner>", "IIdentifyResource<TResource,TId>", "IIdentifyRelatedResource<TRelated,TId>", "IIdentifyRelatedResources<TRelated,TId>", "IResourceLoader<TMessage,TResource>", "ResourceLoaderById<TMessage,TResource,TId>", "SharedResourceLoaderById<TResource,TId>"]
 version: v3
-last_verified: 2026-06-03
+last_verified: 2026-06-21
 audience: [llm]
 ---
 # Trellis.Authorization — API Reference
@@ -150,6 +150,8 @@ public sealed class Actor : IEquatable<Actor>
 | `public bool IsOwner(string resourceOwnerId)` | `bool` | Convenience overload that compares `Id.Value` and `resourceOwnerId` with `StringComparison.Ordinal`. |
 | `public bool HasAttribute(string key)` | `bool` | `true` when `Attributes` contains `key`. |
 | `public string? GetAttribute(string key)` | `string?` | Returns the attribute value or `null` when absent. |
+| `public Result<TVo> GetRequiredAttribute<TVo>(string key) where TVo : class, IParsable<TVo>` | `Result<TVo>` | Parses the attribute through the value object's `IParsable` implementation (any source-generated `Required*` VO — `string`-, `Guid`-, `int`-backed, and so on), validating via its `TryParse` (which routes through `TryCreate`): a success `Result` with the typed value when present and valid, otherwise a failed `Result` with an `Error.InvalidInput` whose field is `key` (a missing attribute fails the same way). Throws `ArgumentNullException` when `key` is null. |
+| `public bool TryGetAttribute<TVo>(string key, out TVo? value) where TVo : class, IParsable<TVo>` | `bool` | `true` with the parsed `value` when the attribute is present and valid; `false` (and `value` is null) when absent or invalid — deny-closes naturally in an authorization gate. Parses through the VO's `IParsable`, so any backing primitive works. Throws `ArgumentNullException` when `key` is null. |
 
 ### `ActorId`
 
@@ -346,12 +348,53 @@ A single loader shared across every command that authorizes against the same `TR
 | --- | --- | --- |
 | `public abstract Task<Result<TResource>> GetByIdAsync(TId id, CancellationToken cancellationToken)` | `Task<Result<TResource>>` | Load the resource by ID; return `Result.Fail` with `Error.NotFound` when missing. |
 
+### `IAuthorizedResource<TMessage, TResource>`
+
+**Declaration**
+
+```csharp
+namespace Trellis.Authorization;
+
+public interface IAuthorizedResource<TMessage, TResource>
+    where TResource : class
+{
+    TResource GetRequiredResource();
+    bool TryGetResource([MaybeNullWhen(false)] out TResource resource);
+}
+```
+
+**Purpose.** v4 typed accessor that gives a handler the **same instance** of the resource that `ResourceAuthorizationBehavior` (or `ResourceAuthorizationViaBehavior`) loaded for the current dispatch — eliminating a duplicate load when the handler would otherwise re-fetch by id from its repository. For non-EF stores (CosmosDB / Dapper / HTTP-backed loaders) this is a measurable performance win; for EF it skips the second LINQ query while preserving change-tracker identity.
+
+**Auto-registration.** Every public entry that registers resource authorization also registers the closed `IAuthorizedResource<TMessage, TResource>` as scoped. Handlers inject it via constructor injection; no additional composition-root call is required.
+
+- For `IAuthorizeResource<TResource>` commands: `TResource` is the same `TResource`.
+- For `IAuthorizeResourceVia<TOwner>` commands: `TResource` is the **leaf** (the resource identified via `IIdentifyResource<TLeaf, TLeafId>`), which is the typical mutation target. The owner accessor is intentionally not exposed in v4; handlers needing owner state read it from their repository.
+
+| Signature | Returns | Description |
+| --- | --- | --- |
+| `TResource GetRequiredResource()` | `TResource` | Returns the resource loaded and authorized for the current pipeline dispatch. Throws `InvalidOperationException` outside a populated dispatch — typical causes: the handler was invoked directly (e.g. from a unit test) without going through the mediator pipeline; the message lacks resource-authorization registration; authentication failed, the loader failed, or `Authorize` was denied (none of which populate the accessor). The exception message names the closed pair so misconfiguration is easy to diagnose. |
+| `bool TryGetResource(out TResource? resource)` | `bool` | Returns `true` with the resource when populated; `false` and `null` otherwise. Provided for genuinely optional reads (e.g., diagnostic logging that runs both inside and outside the pipeline). Production handlers should prefer `GetRequiredResource()` so a misconfigured pipeline fails loudly instead of silently skipping work. |
+
+**Identity, not mutation-readiness.** The accessor returns the SAME instance the loader returned. The framework does not validate that the instance is a canonical mutation-ready aggregate. **Do not inject the accessor** for commands whose loader returns:
+
+- A projection type (e.g. `OrderHeader` for cheap authorization, not the full `Order` aggregate).
+- A no-tracking EF entity that the handler must mutate (the mutation will not persist).
+- A stale read-replica POCO when the handler needs strong consistency.
+- An HTTP DTO that cannot be persisted back through any local repository.
+
+In those cases the handler reloads via the repository. The loader's job is to decide who owns the resource for the authorization check; the handler's job is to fetch the canonical mutation-ready aggregate. These are different shapes and the accessor would couple them incorrectly.
+
+**Concurrency.** Safe across nested `mediator.Send` and concurrent `Task.WhenAll` dispatch of the same closed pair within one DI scope. Implementation uses a per-async-flow linked frame list with a volatile `IsActive` flag — each push allocates a new frame (no shared mutable state between sibling forks), and dispose flips the frame's `IsActive` flag (visible to orphan child tasks that captured the frame at fork time but outlived the parent dispatch). The framework guarantees an orphan task cannot read the resource after the parent's dispatch ends.
+
+See [Recipe 31](trellis-api-cookbook.md#recipe-31--avoid-duplicate-load-with-iauthorizedresourcetcommand-tresource) in the cookbook for the WRONG/FIX shape and a full end-to-end example.
+
 ## Behavioral notes
 
 - **Deny overrides allow.** A permission listed in both `Permissions` and `ForbiddenPermissions` is denied. `HasPermission`, `HasAllPermissions`, `HasAnyPermission`, and `HasPermission(permission, scope)` all observe this rule.
 - **Ordinal comparison everywhere.** Permission lookups, attribute lookups, and `IsOwner` use `StringComparison.Ordinal`. Hydrate permissions and attributes with consistent casing.
 - **Permissions snapshot to frozen collections.** Mutating a collection passed into `Actor` after construction has no effect; the actor exposes a `FrozenSet<string>` / `FrozenDictionary<string, string>` snapshot for O(1) lookups.
 - **Scoped permissions** use the `"Permission:Scope"` convention (`Document.Edit:Tenant_A`). Add scoped entries directly to `Permissions` and check via `HasPermission(string, string)` — no separate scope collection.
+- **Exact match only — no check-time wildcards.** `HasPermission` is a set lookup, so a granted `"seasons:*"` does **not** match a `HasPermission("seasons:read")` check, and a granted unscoped `"seasons"` does **not** satisfy `HasPermission("seasons", scope)`. Expand any `entity:*`-style authoring shorthand into a concrete permission catalog when hydrating the `Actor` (e.g. a static `Permissions` constants class plus a role→permissions map), consistent with the pre-flatten guidance above. `Trellis.Asp` ships [`RolePermissionProjection`](trellis-api-asp.md#rolepermissionprojection) to perform that role→permissions flattening from an app-supplied map. This keeps every check O(1) and avoids the privilege-escalation surface of pattern matching at authorization time.
 - **Pipeline ordering.** When a command implements both `IAuthorize` (static) and `IAuthorizeResource<TResource>` (resource), the mediator behavior runs static checks first; resource loading and `Authorize(actor, resource)` only execute if the static check passes. A loader failure short-circuits before `Authorize` is called.
 
 ## Code examples
@@ -396,14 +439,14 @@ public sealed record CancelOrderCommand(OrderId OrderId)
 
 public interface IOrderRepository
 {
-    Task<Maybe<Order>> GetByIdAsync(OrderId id, CancellationToken ct);
+    Task<Maybe<Order>> FindByIdAsync(OrderId id, CancellationToken ct);
 }
 
 public sealed class OrderResourceLoader(IOrderRepository repo)
     : SharedResourceLoaderById<Order, OrderId>
 {
     public override async Task<Result<Order>> GetByIdAsync(OrderId id, CancellationToken ct) =>
-        (await repo.GetByIdAsync(id, ct)).ToResult(new Error.NotFound(ResourceRef.For<Order>(id)));
+        (await repo.FindByIdAsync(id, ct)).ToResult(new Error.NotFound(ResourceRef.For<Order>(id)));
 }
 ```
 
@@ -477,6 +520,11 @@ var actor = new Actor(
 bool canCancel = actor.HasPermission("orders:cancel");
 bool canViewTenant = actor.HasPermission("orders:view", "tenant-1");
 string? tenant = actor.GetAttribute(ActorAttributes.TenantId);
+
+// Typed accessors parse the claim through the value object's IParsable — any backing primitive,
+// here a Guid-backed tenant id (where: public sealed partial class TenantId : RequiredGuid<TenantId>;):
+Result<TenantId> tenantVo = actor.GetRequiredAttribute<TenantId>(ActorAttributes.TenantId);
+bool hasTenant = actor.TryGetAttribute<TenantId>(ActorAttributes.TenantId, out var typedTenant);
 ```
 
 ## Cross-references

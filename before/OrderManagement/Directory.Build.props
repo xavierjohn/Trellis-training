@@ -1,6 +1,6 @@
 ﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Label="General">
-    <Authors>Xavier John</Authors>
+    <Authors>Your Name</Authors>
     <Company>$(Authors)</Company>
     <Copyright>Copyright © $(Company) 2022. All rights reserved.</Copyright>
     <NeutralLanguage>en</NeutralLanguage>
@@ -27,7 +27,7 @@
     <InternalsVisibleTo Include="$(MSBuildProjectName).Tests" />
     <Using Include="Trellis" />
     <PackageReference Include="DotNet.ReproducibleBuilds" PrivateAssets="All" />
-    <PackageReference Include="Trellis.Analyzers" />
+    <PackageReference Include="Trellis.Analyzers" PrivateAssets="All" />
   </ItemGroup>
 
   <PropertyGroup Condition=" '$(IsTestProject)' == 'false' ">

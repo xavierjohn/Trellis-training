@@ -10,7 +10,7 @@ using Trellis.Asp.Idempotency;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services
-    .AddPresentation(builder.Environment)
+    .AddPresentation(builder.Environment, builder.Configuration)
     .AddApplication()
     .AddAntiCorruptionLayer(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=todos.db");
 
@@ -52,10 +52,15 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 
 app.UseHttpsRedirection();
+
+// Measure every matched request, as early as possible after routing — the SLI middleware emits on the
+// way out, so a request a downstream middleware short-circuits before the controller (e.g. an
+// idempotency replay) is still counted instead of being silently dropped from the metrics.
+app.UseServiceLevelIndicator();
+
 app.UseAuthorization();
 app.UseTrellisIdempotency();
 app.UseScalarValueValidation();
-app.UseServiceLevelIndicator();
 app.MapControllers();
 // /health is a cross-cutting infra endpoint — it must respond to liveness/readiness probes
 // regardless of which API version a client speaks. Tagging it explicitly api-version-neutral
