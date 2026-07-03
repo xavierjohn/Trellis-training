@@ -43,16 +43,22 @@ public class OrdersController : ControllerBase
                     .WithVersionedRoute())
             .AsActionResultAsync<OrderResponse>();
 
-    /// <summary>Get an order by id. <c>GET /api/orders/{id}</c>.</summary>
+    /// <summary>Get an order by id. <c>GET /api/orders/{id}</c>. Emits a strong ETag and honors <c>If-None-Match</c> (304).</summary>
     [HttpGet("{id}", Name = "Orders_GetById")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<OrderResponse>> GetById(
         OrderId id,
         CancellationToken cancellationToken) =>
         _sender.Send(new GetOrderByIdQuery(id), cancellationToken)
-            .ToHttpResponseAsync(OrderResponse.From)
+            .ToHttpResponseAsync(
+                OrderResponse.From,
+                opts => opts
+                    .WithETag(o => o.ETag)
+                    .WithLastModified(o => o.LastModified)
+                    .EvaluatePreconditions())
             .AsActionResultAsync<OrderResponse>();
 
     /// <summary>List overdue orders as a bounded page. <c>GET /api/orders/overdue</c>.</summary>
@@ -75,19 +81,28 @@ public class OrdersController : ControllerBase
                 OrderResponse.From)
             .AsActionResultAsync<PagedResponse<OrderResponse>>();
 
-    /// <summary>Add a line item to a draft order. <c>POST /api/orders/{id}/line-items</c>.</summary>
+    /// <summary>
+    /// Add a line item to a draft order. <c>POST /api/orders/{id}/line-items</c>.
+    /// Optimistic concurrency: requires an <c>If-Match</c> ETag (428 if absent, 412 if stale).
+    /// </summary>
     [HttpPost("{id}/line-items")]
     [Consumes("application/json")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
+    [ProducesResponseType(StatusCodes.Status428PreconditionRequired)]
     public ValueTask<ActionResult<OrderResponse>> AddLineItem(
         OrderId id,
         [FromBody] AddLineItemRequest request,
         CancellationToken cancellationToken) =>
-        _sender.Send(new AddLineItemCommand(id, request.ProductId, request.Quantity), cancellationToken)
-            .ToHttpResponseAsync(OrderResponse.From)
+        _sender.Send(
+                new AddLineItemCommand(id, request.ProductId, request.Quantity, ETagHelper.ParseIfMatch(Request)),
+                cancellationToken)
+            .ToHttpResponseAsync(
+                OrderResponse.From,
+                opts => opts.WithETag(o => o.ETag))
             .AsActionResultAsync<OrderResponse>();
 
     /// <summary>

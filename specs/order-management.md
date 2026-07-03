@@ -229,9 +229,10 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Permission required:** `orders:create`
 - **Input:** orderId, productId, quantity
 - **Validation:** quantity between 1 and 999.
+- **Concurrency:** Requires an `If-Match` ETag for optimistic concurrency (see §7.2).
 - **Behavior:** Order must be in Draft status. Product must not already be in the order. Unit price is captured from the product.
-- **Success:** Returns the updated Order with the new line item.
-- **Failure:** Validation error (not Draft, duplicate product, invalid quantity) → 400. Order or product not found → 404.
+- **Success:** Returns the updated Order (with a new `ETag`) and the new line item.
+- **Failure:** Validation error (not Draft, duplicate product, invalid quantity) → 400. Order or product not found → 404. Missing `If-Match` → 428; stale `If-Match` → 412.
 
 ### 6.6 Remove Line Item from Draft Order (Command)
 
@@ -285,8 +286,9 @@ All operations are implemented as Commands or Queries using CQRS.
 ### 6.12 Get Order by ID (Query)
 
 - **Permission required:** `orders:read`
-- **Input:** orderId
-- **Success:** Returns the Order.
+- **Input:** orderId, optional `If-None-Match`
+- **Behavior:** Emits a strong `ETag` (and `Last-Modified`) and honors `If-None-Match` (see §7.2).
+- **Success:** Returns the Order with an `ETag` header — or `304 Not Modified` (no body) when `If-None-Match` matches the current ETag.
 - **Failure:** Order not found → 404.
 
 ### 6.13 List Orders by Customer (Query)
@@ -316,14 +318,14 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 | POST | /api/products | Create Product | `products:create` | 201 Created | 400, 403, 409 |
 | POST | /api/products/{id}/stock-additions | Add Stock | `products:manage-stock` | 200 OK | 400, 403, 404 |
 | POST | /api/orders | Create Draft Order | `orders:create` | 201 Created | 400, 403, 404 |
-| POST | /api/orders/{id}/line-items | Add Line Item | `orders:create` | 200 OK | 400, 403, 404 |
+| POST | /api/orders/{id}/line-items | Add Line Item | `orders:create` | 200 OK | 400, 403, 404, 412, 428 |
 | DELETE | /api/orders/{id}/line-items/{lineItemId} | Remove Line Item | `orders:create` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/submission | Submit Order | `orders:submit` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/approval | Approve Order | `orders:approve` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/shipment | Ship Order | `orders:ship` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/delivery | Deliver Order | `orders:deliver` | 200 OK | 400, 403, 404 |
 | POST | /api/orders/{id}/cancellation | Cancel Order | `orders:cancel` + ownership | 200 OK | 400, 403, 404 |
-| GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK | 403, 404 |
+| GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK / 304 | 403, 404 |
 | GET | /api/customers/{id}/orders | List Orders by Customer (paged) | `orders:read-all` | 200 OK | 403, 404, 422 |
 | GET | /api/orders/overdue | List Overdue Orders (paged) | `orders:read-all` | 200 OK | 403, 422 |
 
@@ -343,6 +345,13 @@ Every list endpoint returns a **bounded page** — never an unbounded array (an 
 - **Errors:** a malformed `cursor` → 422 (per the framework's invalid-input mapping).
 
 Applies to `GET /api/orders/overdue` and `GET /api/customers/{id}/orders`.
+
+### 7.2 Concurrency & Conditional Requests
+
+Reads and writes use HTTP entity tags (ETags) for optimistic concurrency and conditional requests (RFC 9110). The ETag is the aggregate's version stamp; a client obtains it from a read (or write) response and echoes it back to guard against lost updates:
+
+- **Reads** — `GET /api/orders/{id}` emits a strong `ETag` (and `Last-Modified`). A request with `If-None-Match` carrying the current ETag returns `304 Not Modified` with no body.
+- **Writes** — `POST /api/orders/{id}/line-items` requires an `If-Match` ETag: a missing header → `428 Precondition Required`; an ETag that no longer matches the order → `412 Precondition Failed`. On success the response carries the new `ETag`.
 
 ## 8. Persistence
 
