@@ -5,17 +5,18 @@ using OrderManagement.Domain;
 using Trellis.Authorization;
 
 /// <summary>
-/// Lists every order that has been in Submitted status for more than 7 days
-/// without being approved.
+/// Lists orders that have been in Submitted status for more than 7 days without being
+/// approved, as a bounded page (cursor pagination, ordered by the order's id).
 /// </summary>
-public sealed record ListOverdueOrdersQuery : IQuery<Result<IReadOnlyList<Order>>>, IAuthorize
+public sealed record ListOverdueOrdersQuery(string? Cursor, int? Limit)
+    : IQuery<Result<Page<Order>>>, IAuthorize
 {
     /// <inheritdoc />
     public IReadOnlyList<string> RequiredPermissions { get; } = [Permissions.OrdersReadAll];
 }
 
 public sealed class ListOverdueOrdersQueryHandler
-    : IQueryHandler<ListOverdueOrdersQuery, Result<IReadOnlyList<Order>>>
+    : IQueryHandler<ListOverdueOrdersQuery, Result<Page<Order>>>
 {
     private readonly IOrderRepository _repository;
     private readonly TimeProvider _timeProvider;
@@ -26,12 +27,13 @@ public sealed class ListOverdueOrdersQueryHandler
         _timeProvider = timeProvider;
     }
 
-    public async ValueTask<Result<IReadOnlyList<Order>>> Handle(
+    public async ValueTask<Result<Page<Order>>> Handle(
         ListOverdueOrdersQuery query,
         CancellationToken cancellationToken)
     {
+        var pageSize = PageSize.FromRequested(query.Limit);
+        Cursor? cursor = query.Cursor is { Length: > 0 } token ? new Cursor(token) : null;
         var spec = new OverdueOrderSpecification(_timeProvider.GetUtcNow());
-        var orders = await _repository.QueryAsync(spec, cancellationToken);
-        return Result.Ok(orders);
+        return await _repository.QueryPageAsync(spec, pageSize, cursor, cancellationToken);
     }
 }

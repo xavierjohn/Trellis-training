@@ -3,6 +3,9 @@
     <ProjectReference Include="..\src\Api.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\src\api.http" Link="api.http" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="MartinCostello.Logging.XUnit.v3" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
