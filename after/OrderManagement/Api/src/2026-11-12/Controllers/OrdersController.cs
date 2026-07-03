@@ -44,7 +44,7 @@ public class OrdersController : ControllerBase
                     .WithVersionedRoute())
             .AsActionResultAsync<OrderResponse>();
 
-    /// <summary>Get an order by id. <c>GET /api/orders/{id}</c>. Emits a strong ETag and honors <c>If-None-Match</c> (304).</summary>
+    /// <summary>Get an order by id. <c>GET /api/orders/{id}</c>. Emits a strong <c>ETag</c> and <c>Last-Modified</c>, and evaluates conditional preconditions: <c>If-None-Match</c> matching the current ETag returns 304; a failed <c>If-Match</c>/<c>If-Unmodified-Since</c> returns 412.</summary>
     [HttpGet("{id}", Name = "Orders_GetById")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status304NotModified)]

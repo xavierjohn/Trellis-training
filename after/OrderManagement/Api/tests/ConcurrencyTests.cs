@@ -30,11 +30,28 @@ public class ConcurrencyTests
         var get = await client.GetAsync($"/api/orders/{orderId}?api-version={ApiVersion}", ct);
         get.StatusCode.Should().Be(HttpStatusCode.OK);
         get.Headers.ETag.Should().NotBeNull();
+        get.Content.Headers.LastModified.Should().NotBeNull();
 
         using var conditional = new HttpRequestMessage(HttpMethod.Get, $"/api/orders/{orderId}?api-version={ApiVersion}");
         conditional.Headers.IfNoneMatch.Add(get.Headers.ETag!);
         var notModified = await client.SendAsync(conditional, ct);
         notModified.StatusCode.Should().Be(HttpStatusCode.NotModified);
+    }
+
+    [Fact]
+    public async Task GetById_StaleIfMatch_Returns412()
+    {
+        var client = _fixture.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        var (customerId, productId, _) = await SeedAsync(client, ct);
+        var orderId = (await CreateOrderAsync(client, customerId, productId, ct)).Id;
+
+        // A read that supplies a precondition that fails is a 412 (RFC 9110), not a 304.
+        using var conditional = new HttpRequestMessage(HttpMethod.Get, $"/api/orders/{orderId}?api-version={ApiVersion}");
+        conditional.Headers.IfMatch.Add(new EntityTagHeaderValue("\"stale-etag\""));
+        var resp = await client.SendAsync(conditional, ct);
+        resp.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed);
     }
 
     [Fact]
