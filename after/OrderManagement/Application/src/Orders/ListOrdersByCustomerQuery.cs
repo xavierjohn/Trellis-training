@@ -5,7 +5,7 @@ using OrderManagement.Application.Customers;
 using OrderManagement.Domain;
 using Trellis.Authorization;
 
-/// <summary>Lists every order belonging to a specific customer.</summary>
+/// <summary>Lists a bounded page of orders belonging to a specific customer (cursor + limit).</summary>
 public sealed record ListOrdersByCustomerQuery(CustomerId CustomerId, string? Cursor, int? Limit)
     : IQuery<Result<Page<Order>>>, IAuthorize
 {

@@ -338,8 +338,8 @@ Every list endpoint returns a **bounded page** — never an unbounded array (an 
 
 - **Query parameters:** an optional `limit` (the server clamps it to a maximum; a sensible default applies when omitted) and an optional opaque `cursor`.
 - **Ordering & paging:** cursor (keyset) pagination ordered by the order's id — a time-ordered UUID — used as a stable forward-only seek key; over-fetch by one to determine whether another page exists. Do **not** use OFFSET/skip.
-- **Response body:** a page envelope containing `items`, `next`/`previous` cursor links, `requestedLimit`, `appliedLimit`, `deliveredCount`, and `wasCapped`.
-- **Response headers:** an RFC 8288 `Link` header carrying `rel="next"` (and `rel="prev"` when a previous page exists).
+- **Response body:** a page envelope containing `items`, a `next` cursor link, `requestedLimit`, `appliedLimit`, `deliveredCount`, and `wasCapped`. (The envelope also carries a `previous` slot, but keyset pagination here is forward-only, so it is always null.)
+- **Response headers:** an RFC 8288 `Link` header carrying `rel="next"` when another page exists. Pagination is forward-only, so no `rel="prev"` link is emitted.
 - **Errors:** a malformed `cursor` → 422 (per the framework's invalid-input mapping).
 
 Applies to `GET /api/orders/overdue` and `GET /api/customers/{id}/orders`.

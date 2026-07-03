@@ -9,7 +9,7 @@ using Trellis.Asp;
 /// Integration tests for the bounded-list endpoints (spec §7.1). Exercises the real
 /// SQLite cursor (keyset) pagination path end-to-end: the page envelope, the RFC 8288
 /// <c>Link</c> header, cursor round-trips with no duplicates or gaps, and the
-/// malformed-cursor → 400 contract.
+/// malformed-cursor → 422 contract.
 /// </summary>
 [Collection(TestWebApplicationFactoryCollectionFixture.Id)]
 public class PaginationTests
@@ -26,7 +26,7 @@ public class PaginationTests
         var ct = TestContext.Current.CancellationToken;
 
         var customer = await CreateCustomerAsync(client, $"pager-{Guid.NewGuid():N}@example.com");
-        var product = await CreateProductAsync(client, $"SKU{Random.Shared.Next(10000, 99999)}", 100);
+        var product = await CreateProductAsync(client, $"SKU{Guid.NewGuid():N}".ToUpperInvariant()[..15], 100);
 
         const int total = 5;
         var created = new HashSet<Guid>();
