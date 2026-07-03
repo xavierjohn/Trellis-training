@@ -64,7 +64,32 @@ public class ConcurrencyTests
         fresh.Headers.ETag!.Tag.ToString().Should().NotBe(etag.Tag.ToString());
     }
 
-    private static HttpRequestMessage AddLineItem(Guid orderId, Guid productId, EntityTagHeaderValue? ifMatch)
+    [Fact]
+    public async Task AddLineItem_SameIdempotencyKey_IsReplayed_NotAppliedTwice()
+    {
+        var client = _fixture.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        var (customerId, productId, product2Id) = await SeedAsync(client, ct);
+        var orderId = (await CreateOrderAsync(client, customerId, productId, ct)).Id;
+
+        var get = await client.GetAsync($"/api/orders/{orderId}?api-version={ApiVersion}", ct);
+        var etag = get.Headers.ETag!;
+        var key = Guid.NewGuid().ToString("N");
+
+        var first = await client.SendAsync(AddLineItem(orderId, product2Id, etag, key), ct);
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Same key + same body → the middleware replays the cached response without re-running the
+        // handler, so the (now-stale) ETag is not re-checked and the product is not added twice.
+        var replay = await client.SendAsync(AddLineItem(orderId, product2Id, etag, key), ct);
+        replay.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var final = await client.GetFromJsonAsync<OrderResponse>($"/api/orders/{orderId}?api-version={ApiVersion}", ct);
+        final!.LineItems.Count(li => li.ProductId == product2Id).Should().Be(1);
+    }
+
+    private static HttpRequestMessage AddLineItem(Guid orderId, Guid productId, EntityTagHeaderValue? ifMatch, string? idempotencyKey = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/orders/{orderId}/line-items?api-version={ApiVersion}")
         {
@@ -72,6 +97,7 @@ public class ConcurrencyTests
         };
         if (ifMatch is not null)
             request.Headers.IfMatch.Add(ifMatch);
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey ?? Guid.NewGuid().ToString("N"));
         return request;
     }
 

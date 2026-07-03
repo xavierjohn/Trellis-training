@@ -7,6 +7,7 @@ using OrderManagement.Application.Orders;
 using OrderManagement.Domain;
 using Trellis.Asp;
 using Trellis.Asp.ApiVersioning;
+using Trellis.Asp.Idempotency;
 
 /// <summary>Orders controller (spec §6.4–§6.12, §6.14, §7).</summary>
 [ApiController]
@@ -83,10 +84,12 @@ public class OrdersController : ControllerBase
 
     /// <summary>
     /// Add a line item to a draft order. <c>POST /api/orders/{id}/line-items</c>.
-    /// Optimistic concurrency: requires an <c>If-Match</c> ETag (428 if absent, 412 if stale).
+    /// Retry-safe (<c>Idempotency-Key</c> required) and concurrency-guarded
+    /// (<c>If-Match</c> required: 428 if absent, 412 if stale).
     /// </summary>
     [HttpPost("{id}/line-items")]
     [Consumes("application/json")]
+    [Idempotent]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]

@@ -132,18 +132,33 @@ If-None-Match: {{orderView.response.headers.ETag}}
 POST {{host}}/api/orders/{{orderA.response.body.id}}/line-items?api-version={{apiVersion}}
 Content-Type: application/json
 X-Test-Actor: {{adminActor}}
+Idempotency-Key: http-add-missing-ifmatch
 
 {
   "productId": "{{product2.response.body.id}}",
   "quantity": 4
 }
 
-### Add a line item (a different product) with a matching If-Match (200)
+### Add a line item (a different product) with a matching If-Match + Idempotency-Key (200)
 # @expect status: 200
 POST {{host}}/api/orders/{{orderA.response.body.id}}/line-items?api-version={{apiVersion}}
 Content-Type: application/json
 X-Test-Actor: {{adminActor}}
 If-Match: {{orderView.response.headers.ETag}}
+Idempotency-Key: http-add-fresh
+
+{
+  "productId": "{{product2.response.body.id}}",
+  "quantity": 4
+}
+
+### Retry the SAME add with the SAME Idempotency-Key — replayed, not applied twice (200)
+# @expect status: 200
+POST {{host}}/api/orders/{{orderA.response.body.id}}/line-items?api-version={{apiVersion}}
+Content-Type: application/json
+X-Test-Actor: {{adminActor}}
+If-Match: {{orderView.response.headers.ETag}}
+Idempotency-Key: http-add-fresh
 
 {
   "productId": "{{product2.response.body.id}}",
@@ -156,6 +171,7 @@ POST {{host}}/api/orders/{{orderA.response.body.id}}/line-items?api-version={{ap
 Content-Type: application/json
 X-Test-Actor: {{adminActor}}
 If-Match: {{orderView.response.headers.ETag}}
+Idempotency-Key: http-add-stale
 
 {
   "productId": "{{product.response.body.id}}",

@@ -229,7 +229,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Permission required:** `orders:create`
 - **Input:** orderId, productId, quantity
 - **Validation:** quantity between 1 and 999.
-- **Concurrency:** Requires an `If-Match` ETag for optimistic concurrency (see §7.2).
+- **Concurrency & retries:** Requires an `If-Match` ETag (optimistic concurrency) **and** an `Idempotency-Key` header (retry-safe writes); see §7.2.
 - **Behavior:** Order must be in Draft status. Product must not already be in the order. Unit price is captured from the product.
 - **Success:** Returns the updated Order (with a new `ETag`) and the new line item.
 - **Failure:** Validation error (not Draft, duplicate product, invalid quantity) → 400. Order or product not found → 404. Missing `If-Match` → 428; stale `If-Match` → 412.
@@ -352,6 +352,7 @@ Reads and writes use HTTP entity tags (ETags) for optimistic concurrency and con
 
 - **Reads** — `GET /api/orders/{id}` emits a strong `ETag` (and `Last-Modified`). A request with `If-None-Match` carrying the current ETag returns `304 Not Modified` with no body.
 - **Writes** — `POST /api/orders/{id}/line-items` requires an `If-Match` ETag: a missing header → `428 Precondition Required`; an ETag that no longer matches the order → `412 Precondition Failed`. On success the response carries the new `ETag`.
+- **Idempotent writes** — `POST /api/orders/{id}/line-items` also requires an `Idempotency-Key` header (a missing key → `400`). Retrying with the same key replays the original response instead of applying the change twice, so a network retry can't add the line item twice.
 
 ## 8. Persistence
 
