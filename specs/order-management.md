@@ -197,7 +197,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** firstName, lastName, email, phoneNumber (optional), shippingAddress
 - **Validation:** firstName, lastName, email, shippingAddress fields are validated. phoneNumber, when provided, must be valid.
 - **Success:** Returns the created Customer.
-- **Failure:** Validation error → 400. Duplicate email → 409.
+- **Failure:** Validation error → 422. Duplicate email → 409.
 
 ### 6.2 Create Product (Command)
 
@@ -205,7 +205,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** productName, sku, unitPrice
 - **Validation:** productName, sku, unitPrice are validated.
 - **Success:** Returns the created Product.
-- **Failure:** Validation error → 400. Duplicate SKU → 409.
+- **Failure:** Validation error → 422. Duplicate SKU → 409.
 
 ### 6.3 Add Stock (Command)
 
@@ -213,7 +213,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** productId, quantity
 - **Validation:** quantity must be positive.
 - **Success:** Returns updated Product.
-- **Failure:** Validation error → 400. Product not found → 404.
+- **Failure:** Validation error → 422. Product not found → 404.
 
 ### 6.4 Create Draft Order (Command)
 
@@ -222,7 +222,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Validation:** customerId required, at least one line item, no duplicate productIds in list, each quantity between 1 and 999.
 - **Behavior:** Fetch customer and all referenced products. Create order with unit prices captured from products at creation time. Record the actor's identity as CreatedByActorId. Stock is NOT reserved yet.
 - **Success:** Returns the created Order in Draft status.
-- **Failure:** Validation error → 400. Customer or product not found → 404.
+- **Failure:** Validation error → 422. Customer or product not found → 404.
 
 ### 6.5 Add Line Item to Draft Order (Command)
 
@@ -232,7 +232,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Concurrency & retries:** Requires an `If-Match` ETag (optimistic concurrency) **and** an `Idempotency-Key` header (retry-safe writes); see §7.2.
 - **Behavior:** Order must be in Draft status. Product must not already be in the order. Unit price is captured from the product.
 - **Success:** Returns the updated Order (with a new `ETag`) and the new line item.
-- **Failure:** Validation error (not Draft, duplicate product, invalid quantity) → 400. Order or product not found → 404. Missing `If-Match` → 428; stale `If-Match` → 412. Missing `Idempotency-Key` → 400; a still-in-flight retry → 409; a key reused with a different body → 422.
+- **Failure:** Validation error (not Draft, duplicate product, invalid quantity) → 422. Order or product not found → 404. Missing `If-Match` → 428; stale `If-Match` → 412. Missing `Idempotency-Key` → 400; a still-in-flight retry → 409; a key reused with a different body → 422.
 
 ### 6.6 Remove Line Item from Draft Order (Command)
 
@@ -240,7 +240,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId, lineItemId
 - **Behavior:** Order must be in Draft status. Order must have more than one line item (cannot remove the last one).
 - **Success:** Returns the updated Order without the removed line item.
-- **Failure:** Order not in Draft or cannot remove last line item → 400. Order or line item not found → 404.
+- **Failure:** Order not in Draft or cannot remove last line item → 422. Order or line item not found → 404.
 
 ### 6.7 Submit Order (Command)
 
@@ -248,7 +248,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition Draft → Submitted. Reserves stock for each line item.
 - **Success:** Returns the Order in Submitted status.
-- **Failure:** Invalid transition or insufficient stock → 400. Order not found → 404.
+- **Failure:** Invalid transition or insufficient stock → 422. Order not found → 404.
 
 ### 6.8 Approve Order (Command)
 
@@ -256,7 +256,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition Submitted → Approved. Requires that payment has already been confirmed for the order (see Section 11) — approval is gated on the payment round-trip.
 - **Success:** Returns the Order in Approved status.
-- **Failure:** Payment not yet confirmed → 422. Invalid transition → 400. Order not found → 404.
+- **Failure:** Payment not yet confirmed → 422. Invalid transition → 422. Order not found → 404.
 
 ### 6.9 Ship Order (Command)
 
@@ -264,7 +264,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition Approved → Shipped.
 - **Success:** Returns the Order in Shipped status.
-- **Failure:** Invalid transition → 400. Order not found → 404.
+- **Failure:** Invalid transition → 422. Order not found → 404.
 
 ### 6.10 Deliver Order (Command)
 
@@ -272,7 +272,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition Shipped → Delivered.
 - **Success:** Returns the Order in Delivered status.
-- **Failure:** Invalid transition → 400. Order not found → 404.
+- **Failure:** Invalid transition → 422. Order not found → 404.
 
 ### 6.11 Cancel Order (Command with Ownership Check)
 
@@ -281,7 +281,7 @@ All operations are implemented as Commands or Queries using CQRS.
 - **Input:** orderId
 - **Behavior:** Fires state machine transition to Cancelled. If order was Submitted or Approved, releases reserved stock.
 - **Success:** Returns the Order in Cancelled status.
-- **Failure:** Forbidden (not owner and not admin) → 403. Invalid transition → 400. Order not found → 404.
+- **Failure:** Forbidden (not owner and not admin) → 403. Invalid transition → 422. Order not found → 404.
 
 ### 6.12 Get Order by ID (Query)
 
@@ -314,18 +314,18 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 
 | Method | Path | Operation | Permission | Success | Error Codes |
 |--------|------|-----------|-----------|---------|-------------|
-| POST | /api/customers | Create Customer | `customers:create` | 201 Created | 400, 403, 409 |
-| POST | /api/products | Create Product | `products:create` | 201 Created | 400, 403, 409 |
-| POST | /api/products/{id}/stock-additions | Add Stock | `products:manage-stock` | 200 OK | 400, 403, 404 |
-| POST | /api/orders | Create Draft Order | `orders:create` | 201 Created | 400, 403, 404 |
+| POST | /api/customers | Create Customer | `customers:create` | 201 Created | 422, 403, 409 |
+| POST | /api/products | Create Product | `products:create` | 201 Created | 422, 403, 409 |
+| POST | /api/products/{id}/stock-additions | Add Stock | `products:manage-stock` | 200 OK | 422, 403, 404 |
+| POST | /api/orders | Create Draft Order | `orders:create` | 201 Created | 422, 403, 404 |
 | POST | /api/orders/{id}/line-items | Add Line Item | `orders:create` | 200 OK | 400, 403, 404, 409, 412, 422, 428 |
-| DELETE | /api/orders/{id}/line-items/{lineItemId} | Remove Line Item | `orders:create` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/submission | Submit Order | `orders:submit` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/approval | Approve Order | `orders:approve` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/shipment | Ship Order | `orders:ship` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/delivery | Deliver Order | `orders:deliver` | 200 OK | 400, 403, 404 |
-| POST | /api/orders/{id}/cancellation | Cancel Order | `orders:cancel` + ownership | 200 OK | 400, 403, 404 |
-| GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK / 304 | 403, 404, 412 |
+| DELETE | /api/orders/{id}/line-items/{lineItemId} | Remove Line Item | `orders:create` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/submission | Submit Order | `orders:submit` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/approval | Approve Order | `orders:approve` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/shipment | Ship Order | `orders:ship` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/delivery | Deliver Order | `orders:deliver` | 200 OK | 422, 403, 404 |
+| POST | /api/orders/{id}/cancellation | Cancel Order | `orders:cancel` + ownership | 200 OK | 422, 403, 404 |
+| GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK / 304 | 403, 404, 412, 422 |
 | GET | /api/customers/{id}/orders | List Orders by Customer (paged) | `orders:read-all` | 200 OK | 403, 404, 422 |
 | GET | /api/orders/overdue | List Overdue Orders (paged) | `orders:read-all` | 200 OK | 403, 422 |
 
@@ -370,9 +370,9 @@ Reads and writes use HTTP entity tags (ETags) for optimistic concurrency and con
 
 | Situation | Expected Error | HTTP Status |
 |-----------|---------------|-------------|
-| Invalid input (blank name, bad email format, etc.) | Validation error | 400 |
-| Invalid state transition (e.g., Draft → Approved) | Validation error | 400 |
-| Insufficient stock on submit | Validation error | 400 |
+| Invalid input (blank name, bad email format, etc.) | Validation error | 422 |
+| Invalid state transition (e.g., Draft → Approved) | Validation error | 422 |
+| Insufficient stock on submit | Validation error | 422 |
 | Entity not found by ID | Not Found error | 404 |
 | Duplicate email on customer creation | Conflict error | 409 |
 | Duplicate SKU on product creation | Conflict error | 409 |
@@ -380,6 +380,8 @@ Reads and writes use HTTP entity tags (ETags) for optimistic concurrency and con
 | Cancel order by non-owner (without admin) | Forbidden error | 403 |
 | Approve an order before its payment is confirmed | Validation error | 422 |
 | Record a conflicting payment (different reference or amount already recorded) | Conflict error | 409 |
+
+**Status-code convention:** Business and input-validation failures return **422 Unprocessable Entity** by default — value-object validation via `Error.InvalidInput` (including malformed typed path/query parameters, e.g. a non-GUID `{id}`, and value-object request-body fields), and invalid state-machine transitions via `Error.InvariantViolation`. **400 Bad Request** is reserved for framework-level protocol errors that never reach domain logic: a missing `api-version`, a syntactically malformed request body (invalid JSON), or a missing `Idempotency-Key` header. Do not remap domain validation to 400.
 
 ## 10. Testing Requirements
 
