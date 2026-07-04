@@ -29,11 +29,18 @@ public sealed record DeleteTodoCommand : ICommand<Result<Trellis.Unit>>, IAuthor
     /// </summary>
     public EntityTagValue[]? IfMatchETags { get; }
 
-    public DeleteTodoCommand(TodoId todoId, EntityTagValue[]? ifMatchETags = null)
+    private DeleteTodoCommand(TodoId todoId, EntityTagValue[]? ifMatchETags)
     {
         TodoId = todoId;
         IfMatchETags = ifMatchETags;
     }
+
+    /// <summary>
+    /// Creates an always-valid command. A null id fails closed as validation (422).
+    /// </summary>
+    public static Result<DeleteTodoCommand> TryCreate(TodoId? todoId, EntityTagValue[]? ifMatchETags = null) =>
+        Result.Ensure(todoId is not null, Error.InvalidInput.ForField("id", "required", "Todo id is required."))
+            .Map(_ => new DeleteTodoCommand(todoId!, ifMatchETags));
 
     /// <inheritdoc />
     public IReadOnlyList<string> RequiredPermissions { get; } = [Permissions.TodosDelete];
@@ -50,7 +57,7 @@ public sealed class DeleteTodoCommandHandler : ICommandHandler<DeleteTodoCommand
 
     public async ValueTask<Result<Trellis.Unit>> Handle(DeleteTodoCommand command, CancellationToken cancellationToken) =>
         await _repository.FindByIdAsync(command.TodoId, cancellationToken)
-            .ToResultAsync(new Error.NotFound(ResourceRef.For<TodoItem>(command.TodoId)) { Detail = $"Todo {command.TodoId} not found." })
+            .ToResultAsync(Error.NotFound.For<TodoItem>(command.TodoId, $"Todo {command.TodoId} not found."))
             .RequireETagAsync(command.IfMatchETags)
             .TapAsync(_repository.Remove)
             .MapAsync(_ => Trellis.Unit.Value);

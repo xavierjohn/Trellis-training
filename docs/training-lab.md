@@ -132,7 +132,7 @@ dotnet new install Trellis.AspTemplate     # first time only
 dotnet new trellis-asp -n OrderManagement --authorName "Your Name"
 ```
 
-This creates the full solution: the four-project Clean Architecture layout, the build system (`Directory.Build.props`, `Directory.Packages.props`, `build/test.props`), test infrastructure, a `.gitignore`, a **working sample service** (a small WeatherForecast app you'll replace), and — importantly for the AI — `.github/copilot-instructions.md` plus the `.github/trellis-api-*.md` reference files.
+This creates the full solution: the four-project Clean Architecture layout, the build system (`Directory.Build.props`, `Directory.Packages.props`, `build/test.props`), test infrastructure, a `.gitignore`, a **working sample service** (a small Todo sample app you'll replace), and — importantly for the AI — `.github/copilot-instructions.md` plus the `.github/trellis-api-*.md` reference files.
 
 Verify the scaffold builds and its sample tests pass, then commit:
 
@@ -342,7 +342,7 @@ Domain tests per aggregate; happy-path and error-path tests; every valid **and**
 
 Everything above teaches one person to build one service. The same lab, run **many times across models**, measures something else: **how consistently Trellis steers different AIs to the same design.** If you only want to learn Trellis, you can stop here.
 
-> **What you're measuring:** not whether an AI can write code, but whether **Trellis constrains it enough** that independent runs produce the same architecture, patterns, and error handling. Where runs diverge, Trellis needs a tighter building block. (Reference baselines for the current cohort live in the repo [README](../README.md) and the full scorecards in [`results/evaluation-results.md`](../results/evaluation-results.md).)
+> **What you're measuring:** not whether an AI can write code, but whether **Trellis constrains it enough** that independent runs produce the same architecture, patterns, and error handling. Where runs diverge, Trellis needs a tighter building block. (For a separate, framework-neutral "with vs. without Trellis" study, see [`trellis-ai-benchmark`](https://github.com/xavierjohn/trellis-ai-benchmark).)
 
 **Procedure:** run Steps 1–8 identically in N fresh sessions (new repo + new Copilot conversation each time). Use the same Step 4 prompt verbatim; don't fix the AI's mistakes — score them. After each run, mark every criterion in [What "good" looks like](#what-good-looks-like-and-why) Pass/Fail.
 

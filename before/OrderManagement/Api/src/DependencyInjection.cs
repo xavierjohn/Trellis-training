@@ -2,23 +2,27 @@
 
 using System.Diagnostics;
 using Asp.Versioning.Conventions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using OpenTelemetry.Logs;
 using Scalar.AspNetCore;
 using Trellis.ServiceLevelIndicators;
 using Trellis.Asp;
 using Trellis.Asp.Authorization;
 using Trellis.Asp.Idempotency;
+using Trellis.ResourceNaming.Azure;
 using OrderManagement.Domain;
 
 internal static class DependencyInjection
 {
-    public static IServiceCollection AddPresentation(this IServiceCollection services, IHostEnvironment environment)
+    public static IServiceCollection AddPresentation(
+        this IServiceCollection services, IHostEnvironment environment, IConfiguration configuration)
     {
         services.ConfigureOpenTelemetry();
-        services.ConfigureServiceLevelIndicators();
+        services.ConfigureServiceLevelIndicators(configuration);
         services.AddProblemDetails(options =>
         {
             options.CustomizeProblemDetails = ctx =>
@@ -96,17 +100,54 @@ internal static class DependencyInjection
             {
                 builder.AddAspNetCoreInstrumentation();
                 builder.AddPrimitiveValueObjectInstrumentation();
+                // Trellis.Mediator's TracingBehavior emits a span per command/query from the
+                // "Trellis.Mediator" ActivitySource (TracingBehavior<,>.ActivitySourceName).
+                // Register it so each handler shows in the trace next to the HTTP and
+                // value-object spans; without it those command/query spans are dropped.
+                builder.AddSource("Trellis.Mediator");
                 builder.AddOtlpExporter();
             });
+
+        // Export ILogger logs over OTLP so they appear in the Aspire dashboard's Structured
+        // Logs view (and any OTLP backend), correlated to traces by traceId/spanId. Without
+        // this only metrics and traces are exported and the logs view stays empty.
+        services.AddLogging(logging => logging.AddOpenTelemetry(options =>
+        {
+            options.IncludeFormattedMessage = true;
+            options.IncludeScopes = true;
+            // Export structured ILogger state (e.g. LogInformation("User {UserId}", id)) as
+            // OTLP log attributes so the Structured Logs view shows the key/value pairs, not
+            // just the formatted message.
+            options.ParseStateValues = true;
+            var resourceBuilder = ResourceBuilder.CreateDefault();
+            configureResource(resourceBuilder);
+            options.SetResourceBuilder(resourceBuilder);
+            options.AddOtlpExporter();
+        }));
 
         return services;
     }
 
-    private static IServiceCollection ConfigureServiceLevelIndicators(this IServiceCollection services)
+    private static IServiceCollection ConfigureServiceLevelIndicators(
+        this IServiceCollection services, IConfiguration configuration)
     {
+        // The deployed-environment options are the single source for resource naming and the SLI region.
+        var section = configuration.GetSection("DeployedEnvironment");
+        services.Configure<DeployedEnvironmentOptions>(section);
+        var environment = section.Get<DeployedEnvironmentOptions>() ?? new DeployedEnvironmentOptions();
+
+        // Region is the deployment's telemetry location; fail fast rather than emit a region-less location id.
+        var region = environment.Region;
+        if (string.IsNullOrWhiteSpace(region))
+        {
+            throw new InvalidOperationException(
+                "Configuration 'DeployedEnvironment:Region' is required for the service-level-indicator location id.");
+        }
+
+        var locationId = ServiceLevelIndicator.CreateLocationId("public", region);
         services.AddServiceLevelIndicator(options =>
         {
-            options.LocationId = ServiceLevelIndicator.CreateLocationId("public", "westus3");
+            options.LocationId = locationId;
         })
         .AddMvc()
         .AddApiVersion();

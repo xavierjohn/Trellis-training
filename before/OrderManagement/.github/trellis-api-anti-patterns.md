@@ -1,10 +1,10 @@
 ﻿---
 package: Trellis.Analyzers (applied form)
 namespaces: [Trellis, Trellis.Analyzers]
-types: [TRLS001, TRLS003, TRLS010, TRLS013, TRLS015, TRLS016, TRLS017, TRLS018, TRLS019, TRLS020, TRLS035, TRLS036, TRLS037, TRLS038, TRLS039, TRLS054, TRLS055, TRLS056]
+types: [TRLS001, TRLS003, TRLS010, TRLS013, TRLS015, TRLS016, TRLS018, TRLS019, TRLS020, TRLS035, TRLS036, TRLS037, TRLS038, TRLS039, TRLS054, TRLS055, TRLS056]
 related_docs: [trellis-api-analyzers.md, trellis-api-cookbook.md]
 version: v4
-last_verified: 2026-06-03
+last_verified: 2026-06-17
 audience: [llm]
 ---
 # Trellis Anti-Pattern → Fix Gallery
@@ -73,18 +73,6 @@ b.HasIndex(c => c.Email);                          // TRLS016 — silently no-op
 
 // FIX
 b.HasTrellisIndex(c => new { c.Email });
-```
-
-## TRLS017 — Wrong attribute namespace on a value object
-
-```csharp
-// WRONG — System.ComponentModel.DataAnnotations
-[System.ComponentModel.DataAnnotations.StringLength(10)]    // TRLS017 — generator ignores it
-public sealed partial class CurrencyCode : RequiredString<CurrencyCode>;
-
-// FIX
-[Trellis.StringLength(10)]
-public sealed partial class CurrencyCode : RequiredString<CurrencyCode>;
 ```
 
 ## TRLS018 — Unsafe `Result<T>` deconstruction
@@ -197,7 +185,7 @@ Pick FIX 1 when the non-UoW caller discards the affected-row count.
 await db.SaveChangesAsync(ct);
 
 // FIX 1 — preserve Result pipeline semantics when the count is not needed
-await db.SaveChangesResultUnitAsync(ct);
+return await db.SaveChangesResultUnitAsync(ct);   // propagate the Result up the ROP chain
 ```
 
 Pick FIX 2 when the non-UoW caller needs the affected-row count.
@@ -207,14 +195,14 @@ Pick FIX 2 when the non-UoW caller needs the affected-row count.
 int count = await db.SaveChangesAsync(ct);
 
 // FIX 2 — keep the affected-row count inside Result<int>
-Result<int> result = await db.SaveChangesResultAsync(ct);
+return await db.SaveChangesResultAsync(ct);       // Result<int> carries the affected-row count
 ```
 
 > Under `AddTrellisUnitOfWork<TContext>`, repositories should stage changes only and not call `SaveChanges`/`SaveChangesAsync` at all. `TransactionalCommandBehavior` owns commit.
 
 ## TRLS020 — Composite value object DTO property is not safely deserializable
 
-Composite value objects exposed through request/response DTOs need a supported JSON transport so binding round-trips through `TryCreate`. A bare composite DTO property must use `[JsonConverter(typeof(CompositeValueObjectJsonConverter<T>))]` on the value-object type. A `Maybe<TComposite>` DTO property is not analyzer-clean even when the inner composite type has that converter; use a nullable transport (`TComposite?`) plus `Maybe.From(...)` at the endpoint/API seam instead. The analyzer only inspects DTOs that are visible through a controller `[FromBody]` parameter or response type, a minimal API endpoint handler parameter, or a Mediator message type — the DTO type alone is not enough to trip the rule.
+Composite value objects exposed through request/response DTOs need a supported JSON transport so binding round-trips through `TryCreate`. A bare composite DTO property must use `[JsonConverter(typeof(CompositeValueObjectJsonConverter<T>))]` on the value-object type. A `Maybe<TComposite>` DTO property is not analyzer-clean even when the inner composite type has that converter; use a nullable transport (`TComposite?`) plus `Maybe.From(...)` at the endpoint/API seam instead. The analyzer only inspects DTOs that are actually bound from the wire: a controller `[FromBody]` parameter or response type, or a minimal API endpoint handler parameter. A Mediator command is flagged only when it is itself the bound request body at one of those seams; a command constructed server-side (mapped from a separate request DTO and never deserialized from JSON) is not flagged, because System.Text.Json never touches it. The DTO type alone is not enough to trip the rule.
 
 ```csharp
 // WRONG — bare composite [OwnedEntity] value object exposed as a [FromBody] DTO property without the converter
@@ -454,5 +442,5 @@ public sealed class OrderWorkflow(IMediator mediator)
 
 > Do not move the `mediator.Send(new ChangeOrderStatusCommand(...))` call into the `IDomainEventHandler<TEvent>`. The tracked-dispatch reentrancy guard skips nested tracked dispatch, so events raised by the nested command can be stranded. Queue post-commit work or issue the follow-up command from the application layer after the originating command completes.
 
-Default handler exceptions are still **logged and swallowed** by `MediatorDomainEventPublisher`; cascade detection only catches handler-raised events. Durable side effects and durable at-least-once retry require the outbox pattern — planned for a future release, not shipped today.
+Default handler exceptions are still **logged and swallowed** by `MediatorDomainEventPublisher`; cascade detection only catches handler-raised events. Durable side effects and durable at-least-once retry require the transactional outbox, which **is shipped** in `Trellis.EntityFrameworkCore.Outbox` — wire it via `AddTrellisOutbox<TContext>()`, `AddTrellisOutbox(ModelBuilder)`, and `AddTrellisOutboxInterceptor(...)`. See [trellis-api-efcore-outbox.md](trellis-api-efcore-outbox.md#use-this-file-when).
 

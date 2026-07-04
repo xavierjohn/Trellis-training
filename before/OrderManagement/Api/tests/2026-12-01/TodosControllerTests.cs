@@ -107,6 +107,44 @@ public class TodosControllerTests
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
     }
 
+    // A MISSING (omitted) required value object is a distinct case from a malformed one: the JSON
+    // property is absent, so the value-object binder never runs and Title binds to null. The guard is
+    // CreateTodoCommand.TryCreate(...), which fails closed as business validation (422) before the
+    // handler runs — so a null Title never reaches `new TodoItem(null, ...)` as a
+    // NullReferenceException (500).
+    [Fact]
+    public async Task Create_todo_with_missing_title_returns_422_not_500()
+    {
+        var client = CreateClient("user-1", "todos:create");
+        var body = new { dueDate = DateTime.UtcNow.AddDays(3) };
+
+        var response = await client.PostJsonIdempotentAsync(BaseUrl, body, TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task Create_todo_with_explicit_null_title_returns_422_not_500()
+    {
+        var client = CreateClient("user-1", "todos:create");
+        var body = new { title = (string?)null, dueDate = DateTime.UtcNow.AddDays(3) };
+
+        var response = await client.PostJsonIdempotentAsync(BaseUrl, body, TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task Create_todo_with_missing_due_date_returns_422_not_500()
+    {
+        var client = CreateClient("user-1", "todos:create");
+        var body = new { title = "No due date" };
+
+        var response = await client.PostJsonIdempotentAsync(BaseUrl, body, TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
     [Fact]
     public async Task GetById_existing_todo_returns_200()
     {
@@ -346,6 +384,21 @@ public class TodosControllerTests
     }
 
     [Fact]
+    public async Task Update_with_missing_due_date_returns_422_not_500()
+    {
+        var client = CreateClient("user-1", "todos:create", "todos:read", "todos:update");
+        var dueDate = DateTime.UtcNow.AddDays(5);
+        var createResponse = await client.PostJsonIdempotentAsync(BaseUrl, new { title = "Needs due date", dueDate }, TestContext.Current.CancellationToken);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = await createResponse.Content.ReadAsAsyncWithAssertion<TodoResponse>();
+
+        // Omit dueDate entirely — TryCreate must fail closed (422), not NRE on `dueDate > ...` (500).
+        var response = await client.PutAsJsonAsync($"api/Todos/{created.Id}?{VersionParam}", new { title = "Updated" }, TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
     public async Task Full_lifecycle_create_get_complete_delete()
     {
         var client = CreateClient("lifecycle-user", "todos:create", "todos:read", "todos:complete", "todos:delete");
@@ -438,6 +491,7 @@ public class TodosControllerTests
         firstPage.Next.Should().NotBeNull();
         firstPage.Next!.Cursor.Should().NotBeNullOrEmpty();
         firstPage.Next.Href.Should().Contain("cursor=");
+        firstPage.Next.Href.Should().Contain(VersionParam, "PageUrl must inject the api-version so the next-page link resolves under query-string versioning");
 
         var secondPage = await client.GetFromJsonAsync<PagedTodoResponse>(
             $"api/Todos/overdue?cursor={firstPage.Next.Cursor}&limit=1&{VersionParam}",
