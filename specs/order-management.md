@@ -325,10 +325,11 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 | POST | /api/orders/{id}/shipment | Ship Order | `orders:ship` | 200 OK | 422, 403, 404 |
 | POST | /api/orders/{id}/delivery | Deliver Order | `orders:deliver` | 200 OK | 422, 403, 404 |
 | POST | /api/orders/{id}/cancellation | Cancel Order | `orders:cancel` + ownership | 200 OK | 422, 403, 404 |
-| GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK / 304 | 403, 404, 412, 422 |
+| GET | /api/orders/{id} | Get Order | `orders:read` | 200 OK / 304 | 403, 404, 412 |
 | GET | /api/customers/{id}/orders | List Orders by Customer (paged) | `orders:read-all` | 200 OK | 403, 404, 422 |
 | GET | /api/orders/overdue | List Overdue Orders (paged) | `orders:read-all` | 200 OK | 403, 422 |
 
+- The **Error Codes** column lists each endpoint's *domain* failures only. Universal protocol/binding statuses are omitted to avoid repetition and apply wherever relevant (see the status-code convention in §9): **400** for a missing `api-version` or a syntactically malformed JSON body, and **422** for a malformed typed path/query parameter such as a non-GUID `{id}`. The pagination `cursor` is the single malformed-parameter case enumerated per-endpoint, as part of the pagination contract in §7.1.
 - All requests must include `?api-version=2026-11-12` query parameter. Requests without a version return 400 Bad Request.
 - All requests must include authentication context via the `X-Test-Actor` header (see Section 5.5). Requests without authentication context use the default Admin actor.
 - POST /customers and POST /orders return 201 Created with a Location header pointing to the created resource.
