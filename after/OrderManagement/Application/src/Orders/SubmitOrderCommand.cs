@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Orders;
+﻿namespace OrderManagement.Application.Orders;
 
 using FluentValidation;
 using Mediator;
@@ -22,33 +22,21 @@ public sealed class SubmitOrderCommandValidator : AbstractValidator<SubmitOrderC
     public SubmitOrderCommandValidator() => RuleFor(c => c.OrderId).NotNull();
 }
 
-public sealed class SubmitOrderCommandHandler : ICommandHandler<SubmitOrderCommand, Result<Order>>
+public sealed class SubmitOrderCommandHandler(
+    IOrderRepository orderRepository, IProductRepository productRepository, TimeProvider timeProvider)
+    : ICommandHandler<SubmitOrderCommand, Result<Order>>
 {
-    private readonly IOrderRepository _orderRepository;
-    private readonly IProductRepository _productRepository;
-    private readonly TimeProvider _timeProvider;
-
-    public SubmitOrderCommandHandler(
-        IOrderRepository orderRepository,
-        IProductRepository productRepository,
-        TimeProvider timeProvider)
-    {
-        _orderRepository = orderRepository;
-        _productRepository = productRepository;
-        _timeProvider = timeProvider;
-    }
-
     public async ValueTask<Result<Order>> Handle(SubmitOrderCommand command, CancellationToken cancellationToken)
     {
-        var orderMaybe = await _orderRepository.FindByIdAsync(command.OrderId, cancellationToken);
+        var orderMaybe = await orderRepository.FindByIdAsync(command.OrderId, cancellationToken).ConfigureAwait(false);
         if (!orderMaybe.TryGetValue(out var order))
-            return Result.Fail<Order>(new Error.NotFound(ResourceRef.For<Order>(command.OrderId))
-            { Detail = $"Order {command.OrderId} not found." });
+            return Result.Fail<Order>(Error.NotFound.For<Order>(
+                id: command.OrderId, detail: $"Order {command.OrderId} not found."));
 
         var productIds = order.LineItems.Select(li => li.ProductId).Distinct().ToList();
-        var products = await _productRepository.FindManyByIdAsync(productIds, cancellationToken);
+        var products = await productRepository.FindManyByIdAsync(productIds, cancellationToken).ConfigureAwait(false);
         var productsById = products.ToDictionary(p => p.Id);
 
-        return order.Submit(productsById, _timeProvider).Map(_ => order);
+        return order.Submit(productsById, timeProvider).Map(_ => order);
     }
 }

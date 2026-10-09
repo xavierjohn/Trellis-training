@@ -1,7 +1,8 @@
-namespace Api.Tests;
+﻿namespace Api.Tests;
 
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using OrderManagement.Api.v2026_11_12.Models;
 using Trellis.Asp;
 
@@ -55,7 +56,9 @@ public class PaginationTests
             {
                 // 5 orders at 2 per page ⇒ the first page must carry a next cursor + Link header.
                 page.Next.Should().NotBeNull();
+                new Uri(page.Next!.Href).Query.Should().Contain($"api-version={ApiVersion}");
                 response.Headers.GetValues("Link").Should().Contain(v => v.Contains("rel=\"next\""));
+                response.Headers.GetValues("Link").Should().Contain(v => v.Contains(page.Next.Href));
                 firstPage = false;
             }
 
@@ -81,6 +84,7 @@ public class PaginationTests
             ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertQueryViolationAsync(response, "cursor", "cursor.malformed");
     }
 
     [Fact]
@@ -109,6 +113,72 @@ public class PaginationTests
             $"/api/orders/overdue?api-version={ApiVersion}&cursor=not-a-valid-cursor", ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertQueryViolationAsync(response, "cursor", "cursor.malformed");
+    }
+
+    [Theory]
+    [InlineData("cursor=")]
+    [InlineData("cursor=%20")]
+    [InlineData("cursor=token&cursor=token")]
+    [InlineData("limit=")]
+    [InlineData("limit=0")]
+    [InlineData("limit=-1")]
+    [InlineData("limit=oops")]
+    [InlineData("limit=2147483648")]
+    [InlineData("limit=1&limit=2")]
+    public async Task ListOverdue_InvalidRawPagination_Returns422(string query)
+    {
+        var client = _fixture.CreateClient();
+
+        var response = await client.GetAsync(
+            $"/api/orders/overdue?api-version={ApiVersion}&{query}",
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertRawQueryViolationAsync(response, query);
+    }
+
+    [Theory]
+    [InlineData("cursor=")]
+    [InlineData("cursor=%20")]
+    [InlineData("cursor=token&cursor=token")]
+    [InlineData("limit=")]
+    [InlineData("limit=0")]
+    [InlineData("limit=-1")]
+    [InlineData("limit=oops")]
+    [InlineData("limit=2147483648")]
+    [InlineData("limit=1&limit=2")]
+    public async Task ListOrdersByCustomer_InvalidRawPagination_Returns422(string query)
+    {
+        var client = _fixture.CreateClient();
+        var customer = await CreateCustomerAsync(client, $"rawquery-{Guid.NewGuid():N}@example.com");
+
+        var response = await client.GetAsync(
+            $"/api/customers/{customer.Id}/orders?api-version={ApiVersion}&{query}",
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertRawQueryViolationAsync(response, query);
+    }
+
+    private static Task AssertRawQueryViolationAsync(HttpResponseMessage response, string query)
+    {
+        var field = query.StartsWith("cursor=", StringComparison.Ordinal) ? "cursor" : "limit";
+        var code = field == "cursor" ? "cursor.malformed"
+            : query is "limit=0" or "limit=-1" ? "page-size.out-of-range" : "format.integer";
+        return AssertQueryViolationAsync(response, field, code);
+    }
+
+    private static async Task AssertQueryViolationAsync(HttpResponseMessage response, string field, string code)
+    {
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        using var json = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var violation = json.RootElement.GetProperty("fieldViolations").EnumerateArray().Single();
+        violation.GetProperty("code").GetString().Should().Be(code);
+        var location = violation.GetProperty("location");
+        location.GetProperty("in").GetString().Should().Be("query");
+        location.GetProperty("name").GetString().Should().Be(field);
     }
 
     private static async Task<CustomerResponse> CreateCustomerAsync(HttpClient client, string email)

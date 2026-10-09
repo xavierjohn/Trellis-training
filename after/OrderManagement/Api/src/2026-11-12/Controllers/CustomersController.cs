@@ -1,4 +1,4 @@
-namespace OrderManagement.Api.v2026_11_12.Controllers;
+﻿namespace OrderManagement.Api.v2026_11_12.Controllers;
 
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
@@ -11,25 +11,21 @@ using Trellis.Asp.ApiVersioning;
 
 /// <summary>Customers controller (spec §6.1, §6.13, §7).</summary>
 [ApiController]
-[Produces("application/json")]
 [Route("api/[controller]")]
-public class CustomersController : ControllerBase
+public class CustomersController(ISender sender) : ControllerBase
 {
-    private readonly ISender _sender;
-
-    public CustomersController(ISender sender) => _sender = sender;
-
     /// <summary>Create a new customer. <c>POST /api/customers</c>.</summary>
     [HttpPost]
     [Consumes("application/json")]
     [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public ValueTask<ActionResult<CustomerResponse>> Create(
         [FromBody] CreateCustomerRequest request,
         CancellationToken cancellationToken) =>
-        _sender.Send(
+        sender.Send(
                 new CreateCustomerCommand(
                     request.FirstName,
                     request.LastName,
@@ -40,10 +36,7 @@ public class CustomersController : ControllerBase
             .ToHttpResponseAsync(
                 CustomerResponse.From,
                 opts => opts
-                    .CreatedAtRoute("Customers_GetById", c => new Microsoft.AspNetCore.Routing.RouteValueDictionary
-                    {
-                        ["id"] = c.Id.Value,
-                    })
+                    .CreatedAtRoute("Customers_GetById", c => c.Id.Value)
                     .WithVersionedRoute())
             .AsActionResultAsync<CustomerResponse>();
 
@@ -62,16 +55,16 @@ public class CustomersController : ControllerBase
     /// (spec §6.13). Requires <see cref="Permissions.OrdersReadAll"/>.
     /// </summary>
     [HttpGet("{id}/orders", Name = "Customers_ListOrders")]
+    [InputOrigin(InputLocation.Query)]
     [ProducesResponseType(typeof(PagedResponse<OrderResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<PagedResponse<OrderResponse>>> ListOrders(
         CustomerId id,
-        [FromQuery] string? cursor,
-        [FromQuery] int? limit,
         CancellationToken cancellationToken) =>
-        _sender.Send(new ListOrdersByCustomerQuery(id, cursor, limit), cancellationToken)
+        Request.TryCreatePageRequest()
+            .BindAsync(pagination => sender.Send(new ListOrdersByCustomerQuery(id, pagination), cancellationToken))
             .ToHttpResponseAsync(
                 HttpContext.PageUrl("Customers_ListOrders", (next, applied) =>
                     new Microsoft.AspNetCore.Routing.RouteValueDictionary

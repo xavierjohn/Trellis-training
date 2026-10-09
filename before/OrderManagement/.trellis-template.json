@@ -1,0 +1,8 @@
+﻿{
+  "template": "asp",
+  "apiVersioning": "True",
+  "database": "sqlite",
+  "auth": "jwt",
+  "telemetryExporters": "otlp",
+  "deployment": "none"
+}

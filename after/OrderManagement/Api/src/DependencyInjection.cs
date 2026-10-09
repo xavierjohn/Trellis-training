@@ -1,17 +1,21 @@
 ﻿namespace OrderManagement.Api;
 
-using System.Diagnostics;
+using Asp.Versioning;
 using Asp.Versioning.Conventions;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.OpenApi;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using Trellis.ServiceLevelIndicators;
 using Trellis.Asp;
+using Trellis.Asp.ApiVersioning;
 using Trellis.Asp.Authorization;
 using Trellis.Asp.Idempotency;
 using OrderManagement.Domain;
+using Trellis.ServiceDefaults;
 
 internal static class DependencyInjection
 {
@@ -19,52 +23,48 @@ internal static class DependencyInjection
     {
         services.ConfigureOpenTelemetry();
         services.ConfigureServiceLevelIndicators();
-        services.AddProblemDetails(options =>
-        {
-            options.CustomizeProblemDetails = ctx =>
-            {
-                // Always surface the active trace id so clients can correlate the error with
-                // server-side spans / log entries. Falls back to the ASP.NET connection-level
-                // trace identifier when no diagnostic Activity is current.
-                var traceId = Activity.Current?.Id ?? ctx.HttpContext.TraceIdentifier;
-                ctx.ProblemDetails.Extensions["traceId"] = traceId;
-
-                // For 500 responses do not leak raw exception detail to the client; replace the
-                // default detail with a support-friendly message that nudges the user toward
-                // filing a ticket with the trace id.
-                if (ctx.ProblemDetails.Status == StatusCodes.Status500InternalServerError)
-                {
-                    ctx.ProblemDetails.Detail =
-                        "An error occurred in our API. Please refer the trace id with our support team.";
-                }
-
-                // RFC 9110 §15.5.6: the Allow header lists methods the resource supports.
-                // ASP.NET routing already emits the header on a 405; surface it in the body
-                // as a structured array so clients that ignore response headers still discover
-                // the supported methods.
-                if (ctx.ProblemDetails.Status == StatusCodes.Status405MethodNotAllowed &&
-                    ctx.HttpContext.Response.Headers.TryGetValue("Allow", out var allow))
-                {
-                    // RFC 9110 §5.6.1: Allow is comma-separated with optional whitespace.
-                    // Split on ',' and trim so a server that emits "GET,PUT,DELETE" (no spaces)
-                    // surfaces three array entries, not one combined string.
-                    ctx.ProblemDetails.Extensions["allow"] = allow.ToString()
-                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                }
-            };
-        });
         services.AddControllers();
-        services.AddTrellisAspWithScalarValidation();
+        services.AddTrellis(options => options
+            .UseAsp(asp => asp.UseVersionedPageUrls())
+            .UseScalarValueValidation()
+            .UseProblemDetails()
+            .UseIdempotency());
         services.AddResourceCollectionName<Customer>("customers");
         services.AddResourceCollectionName<Product>("products");
         services.AddResourceCollectionName<Order>("orders");
         services.AddResourceCollectionName<LineItem>("line-items");
-        services.AddTrellisIdempotency();
         services.AddInMemoryIdempotencyStore();
-        services.AddApiVersioning()
+        services.AddApiVersioning(options => options.ApiVersionReader = new QueryStringApiVersionReader())
                 .AddMvc(options => options.Conventions.Add(new VersionByNamespaceConvention()))
                 .AddApiExplorer()
-                .AddOpenApi(options => options.Document.AddScalarTransformers());
+                .AddOpenApi(options =>
+                {
+                    options.Document.AddScalarTransformers();
+                    options.Document.AddOperationTransformer((operation, context, _) =>
+                    {
+                        if (!context.Description.ActionDescriptor.EndpointMetadata
+                            .OfType<HttpGetAttribute>()
+                            .Any(attribute => attribute.Name is "Orders_GetOverdue" or "Customers_ListOrders"))
+                            return Task.CompletedTask;
+
+                        operation.Parameters ??= [];
+                        operation.Parameters.Add(new OpenApiParameter
+                        {
+                            Name = "cursor",
+                            In = ParameterLocation.Query,
+                            Description = "Opaque continuation token. Omit for the first page; empty or repeated values are invalid.",
+                            Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+                        });
+                        operation.Parameters.Add(new OpenApiParameter
+                        {
+                            Name = "limit",
+                            In = ParameterLocation.Query,
+                            Description = $"Requested page size; defaults to {PageSize.Default}, capped at {PageSize.Max}.",
+                            Schema = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32" },
+                        });
+                        return Task.CompletedTask;
+                    });
+                });
         services.AddHealthChecks();
 
         if (environment.IsDevelopment())
@@ -118,7 +118,7 @@ internal static class DependencyInjection
             .WithTracing(builder =>
             {
                 builder.AddAspNetCoreInstrumentation();
-                builder.AddPrimitiveValueObjectInstrumentation();
+                builder.AddTrellisPrimitivesInstrumentation();
                 builder.AddOtlpExporter();
             });
 

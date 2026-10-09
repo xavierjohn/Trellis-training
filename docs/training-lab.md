@@ -1,4 +1,4 @@
-# Trellis Training Lab — Order Management
+﻿# Trellis Training Lab — Order Management
 
 > **Learn to build a production-shaped enterprise service on the [Trellis](https://github.com/xavierjohn/Trellis) framework** by guiding an AI through a real business spec — then studying *exactly* what it built and *why* each pattern is there. By the end you'll be able to read, run, extend, and review an idiomatic Trellis service.
 >
@@ -66,7 +66,7 @@ These three diagrams capture the spine of the service — refer back to them as 
   <img src="images/rop-pipeline.png" alt="Railway-Oriented Programming — Result chains flowing through a handler" width="560"/>
 </p>
 
-> 📚 **Where the deep reference lives:** the scaffold (next step) drops a set of `.github/trellis-api-*.md` files — the authoritative, package-synced API reference (`trellis-api-core.md`, `trellis-api-primitives.md`, `trellis-api-efcore.md`, `trellis-api-asp.md`, `trellis-api-authorization.md`, `trellis-api-statemachine.md`, `trellis-api-testing-reference.md`, `trellis-api-cookbook.md`, and more) — alongside `.github/copilot-instructions.md`, which tells the AI *how* to build with Trellis. You don't need to read them cover to cover; dip in when a concept above is unfamiliar.
+> 📚 **Where the deep reference lives:** start at the generated `AGENTS.md`, then `.agentdocs/README.md`. Its required router is `.agentdocs/packages/trellis.core/trellis/trellis-start-here.md`; it routes each task to exact package signatures and selected cookbook recipe bodies. Read those directly, on demand. AgentDocs installs version-aligned guidance from approved NuGet packages; the thin `.github/copilot-instructions.md` pointer is not a second API catalog.
 
 ---
 
@@ -75,7 +75,7 @@ These three diagrams capture the spine of the service — refer back to them as 
 - .NET 10 SDK
 - VS Code or Visual Studio
 - GitHub Copilot (Copilot Chat in VS Code) — or another AI model you want to drive the build
-- The Trellis ASP template: `dotnet new install Trellis.AspTemplate`
+- The course template: `dotnet new install Trellis.Asp.Templates@1.0.151-alpha` (Trellis alpha.557)
 - Docker Desktop *(optional — for the Aspire Dashboard telemetry viewer)*
 - Basic C# and web-API familiarity
 
@@ -128,27 +128,30 @@ Verify it's running: `docker ps`.
 ## Step 3: Scaffold with the template
 
 ```bash
-dotnet new install Trellis.AspTemplate     # first time only
-dotnet new trellis-asp -n OrderManagement --authorName "Your Name"
+dotnet new install Trellis.Asp.Templates@1.0.151-alpha
+dotnet new trellis-asp -n OrderManagement --author-name "Your Name" --api-versioning true
 ```
 
-This creates the full solution: the four-project Clean Architecture layout, the build system (`Directory.Build.props`, `Directory.Packages.props`, `build/test.props`), test infrastructure, a `.gitignore`, a **working sample service** (a small Todo sample app you'll replace), and — importantly for the AI — `.github/copilot-instructions.md` plus the `.github/trellis-api-*.md` reference files.
+This creates the four-project Clean Architecture solution, shared build/test configuration,
+a working Todo sample, `AGENTS.md`, the local AgentDocs tool manifest, and managed package
+guidance. Versioning is an explicit course choice; it is not the template default.
 
 Verify the scaffold builds and its sample tests pass, then commit:
 
 ```bash
 dotnet build
-dotnet test
+dotnet test --solution OrderManagement.slnx
+dotnet agentdocs check --strict
 git add -A && git commit -m "Scaffold with Trellis template"
 ```
 
-> **Why scaffold instead of letting the AI create everything?** The template owns the boilerplate — project structure, package wiring, DI, global usings — so the AI spends its budget on **business logic**, not plumbing, and every run starts from an identical, known-good baseline. The `copilot-instructions.md` + `trellis-api-*.md` files are what make the AI's output idiomatic and consistent.
+> **Why scaffold?** The template owns project/package/test plumbing. The required router and on-demand references prevent invented APIs. After changing package references or versions, run `dotnet restore` and `dotnet agentdocs sync` from the generated Git root.
 
 ## Step 4: Implement the service
 
 Open Copilot Chat, paste the **entire contents** of [`specs/order-management.md`](../specs/order-management.md) as context, then prompt:
 
-> Implement the Order Management service according to the spec above. Replace the existing sample code with the Order Management domain.
+> Implement the Order Management service according to the spec above. Read AGENTS.md and the required AgentDocs router first, then the selected recipes and package references. Replace the Todo sample with the Order Management domain. Use shipped actor-aware handler bases for checked identity and loaded resources, TryCreatePageRequest at pagination boundaries, typed EF SeekDefinition paging, and ServiceDefaults ProblemDetails configuration. Do not recreate these helpers or redeclare generated/inherited members. Preserve all business rules and test the real Mediator pipeline.
 
 **Alternate (SQL Server):** add *"Use SQL Server instead of SQLite. Apply EF Core migrations from a separate console app instead of on web-service startup."*
 
@@ -156,7 +159,7 @@ Open Copilot Chat, paste the **entire contents** of [`specs/order-management.md`
 
 ```bash
 dotnet build
-dotnet test
+dotnet test --solution OrderManagement.slnx
 ```
 
 If there are build or test errors, paste them back and let Copilot fix them. Repeat until clean.
@@ -185,7 +188,7 @@ Open the **Aspire Dashboard** (http://localhost:18888) and watch the traces whil
 6. **Submit the order** → `200`, status `Submitted` (stock reserved)
 7. **Cancel as a *different* SalesRep** → `403 Forbidden` (not the owner)
 8. **Approve without permission** → `403 Forbidden`
-9. **Approve as WarehouseManager** → `200`
+9. **Wait for the development payment simulator to confirm payment**, then approve as WarehouseManager → `200` (approval before payment returns `422`)
 10. **Cancel as the original creator** → `200`, stock restored
 11. **Health check** (`/health`) → `200`
 
@@ -220,7 +223,7 @@ Verify it contains severity-ranked friction points (each with context + a sugges
 > **Domain:**
 > - Add `Returned` to the `OrderStatus` enum
 > - Add a `ReturnReason` value object — required string, 10–500 characters
-> - Add `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTime>` on `Order` (set during the Delivered and Return transitions)
+> - Add `DeliveredAt` and `ReturnedAt` as `partial Maybe<DateTimeOffset>` on `Order` (set using injected TimeProvider during the Delivered and Return transitions; do not redeclare inherited CreatedAt/LastModified)
 > - Add transition `Delivered → Returned`
 >   - Precondition: delivered within the last 30 days (`DeliveredAt` exists and ≤ 30 days ago)
 >   - Side effect: release reserved stock for each line item (same as cancel)
@@ -230,15 +233,15 @@ Verify it contains severity-ranked friction points (each with context + a sugges
 >
 > **Application:** add `ReturnOrderCommand` (permission `orders:return`) + handler; grant `orders:return` to SalesRep.
 >
-> **API:** `POST /api/orders/{id}/return` with body `{ "reason": "..." }` → 200 on success, 400 on expired window / invalid transition, 404 if not found, 403 if missing permission.
+> **API:** `POST /api/orders/{id}/return` with body `{ "reason": "..." }` → 200 on success, 422 on expired window / invalid transition, 404 if not found, 403 if missing permission.
 >
-> **Tests:** domain (return within window, after 30 days, from non-Delivered status, stock released), application (happy path, missing permission), API (HTTP round-trip, 400 for expired window).
+> **Tests:** domain (return within window, after 30 days, from non-Delivered status, stock released), application (real Mediator dispatch, happy path, missing permission), API (HTTP round-trip, 422 for expired window).
 
 Then verify **zero regressions**:
 
 ```bash
 dotnet build     # 0 errors
-dotnet test      # all previous tests pass + new return tests pass
+dotnet test --solution OrderManagement.slnx
 git add -A && git commit -m "Add Order Returns feature"
 ```
 
@@ -252,13 +255,13 @@ You don't have to run anything to learn from this — a complete, passing refere
 
 | Read | Notice |
 |---|---|
-| `Domain/src/ValueObjects/` (`CustomerId.cs`, `Sku.cs`, `UnitPrice.cs`, …) | Every domain concept is its own type with a private ctor + `TryCreate`. No raw `Guid`/`string`/`decimal` crosses a domain boundary. |
+| `Domain/src/ValueObjects/` (`CustomerId.cs`, `Sku.cs`, `UnitPrice.cs`, …) | Partial scalar types use attributes and generated factories/converters/equality; don't hand-write inherited members. Composite `ShippingAddress` uses the allocation-free `EqualityComponents` sink. |
 | `Domain/src/ValueObjects/OrderStatus.cs` | A `RequiredEnum<T>` smart enum — not a C# `enum`. It carries behavior and converts cleanly for JSON and EF Core. |
 | `Domain/src/Aggregates/Order.cs` | The aggregate: a `LazyStateMachine` configures guarded transitions; methods like `Submit`/`Cancel` return `Result` and thread side effects with `Bind`/`Map`/`Tap`. This is ROP and the state machine in one file. |
 | `Domain/src/Specifications/OverdueOrderSpecification.cs` | A reusable, testable, EF-translatable predicate — business rules as objects. |
-| `Application/src/Orders/` | Commands/queries + handlers; repository **interfaces** (`IOrderRepository`) live here. Note `CancelOrderCommand` carries `IAuthorize` + resource-authorization metadata — the handler has no `if (actor != owner)`. |
+| `Application/src/Orders/` | `CreateDraftOrderCommandHandler` receives the checked actor via `ActorCommandHandler`; `CancelOrderCommandHandler` receives the same actor and loaded order via `ActorResourceCommandHandler`. No provider/accessor constructor plumbing or fallback reload. Ordinary handlers stay ordinary when they need neither input. |
 | `Acl/src/` (`AppDbContext.cs`, `*Configuration.cs`, `*Repository.cs`, `DependencyInjection.cs`) | `ApplyTrellisConventions` (almost no manual mapping), repository **implementations** of the Application interfaces (Dependency Inversion), and `AddTrellisUnitOfWork<AppDbContext>` — the commit is wired here, not in handlers. |
-| `Api/src/2026-11-12/` (`Controllers/`, `Models/`) | Thin controllers that bind value objects, send the command, and map the `Result` to an HTTP response + DTO. Versioning is by namespace/folder. |
+| `Api/src/2026-11-12/` (`Controllers/`, `Models/`) | Thin controllers map Results and parse raw cursor/limit with `TryCreatePageRequest`; `PageRequest` flows to typed EF seeks. `UseAsp(asp => asp.UseVersionedPageUrls())` supplies versioned next links; `UseProblemDetails()` replaces hand-written trace/error customization. |
 | `*/tests/` | `Trellis.Testing` assertions (`.Should().BeSuccess()`, `.Should().HaveValue()`), state-machine transition tests, authorization tests, and full HTTP round-trips. |
 
 ---
@@ -274,12 +277,12 @@ The Order Management lab scores against **57 criteria across five levels**; a pa
 | Property | How to check | Why it matters |
 |---|---|---|
 | Value objects exist | `CustomerId`, `OrderId`, `ProductId`, `LineItemId`, `Sku`, `UnitPrice`, `ShippingAddress`, `FirstName`, `LastName`, `ProductName`, `Quantity` are distinct types | No primitive obsession; the type system encodes domain identity |
-| Value objects use `TryCreate` | each returns `Result<T>` from a private ctor | Validity is established once, at construction |
+| Value objects use `TryCreate` | generated scalar factories or an application-owned composite factory return `Result<T>`; no duplicate factories/equality | Validity is established once, at construction |
 | Aggregates inherit `Aggregate<TId>` | `Customer`, `Product`, `Order` | DDD identity, equality, and domain-event support |
 | Line items are entities | `LineItem : Entity<LineItemId>` | Identity within the aggregate boundary |
 | State machine uses a guarded machine | `Order` transitions via `LazyStateMachine` + `FireResult` | Transitions are validated centrally |
 | Transitions return `Result` | not `void`/throw | Illegal transitions surface as values |
-| Domain events defined | all 5 events from the spec | The domain announces what happened |
+| Domain events defined | lifecycle events plus `OrderPaidEvent` from the spec | The domain announces what happened |
 | Specification exists | `OverdueOrderSpecification : Specification<Order>` | Reusable, translatable business rule |
 | CQRS used | every operation is a Command/Query + handler via Mediator | Uniform, testable application layer |
 | Authorization on commands | commands implement `IAuthorize`; `CancelOrderCommand` adds resource authorization | Declarative, not hand-rolled |
@@ -301,7 +304,7 @@ The Order Management lab scores against **57 criteria across five levels**; a pa
 | Line-item price is a snapshot at creation | Orders don't silently re-price |
 | Duplicate product in an order is rejected | One line per product |
 | The last line item can't be removed | An order always has content |
-| Error taxonomy is correct | `Validation` / `NotFound` / `Conflict` / `Forbidden` used per the spec |
+| Error taxonomy is correct | `InvalidInput` / `InvariantViolation` / `NotFound` / `Conflict` / `Forbidden`, code-first factories and lazy guards used per the spec |
 | Order total = Σ(unit price × quantity) | Correct money math |
 | Overdue spec checks Submitted + 7-day threshold, SQL-translatable | Queryable business rule |
 | IDs use `RequiredGuid` with `Guid.CreateVersion7()` | Sortable, index-friendly identifiers |
@@ -348,17 +351,24 @@ Everything above teaches one person to build one service. The same lab, run **ma
 
 **Scoring:** a criterion *counts* for a model if it passes. Sum per level for a total out of 57; **52+/57 passes**. For cross-run consistency, track how many of N runs pass each criterion and treat anything below ~70% as a framework/instruction gap to close.
 
-**Scriptable structural checks** (run from the service root):
+**Structural review** (run from the service root):
 
 ```bash
 grep -rnw "catch" Domain/src Application/src --include="*.cs" | wc -l ;                  # 0 — no exception handling on the happy path
 grep -rn "Guid " Domain/src --include="*.cs" | grep -vE "RequiredGuid|ValidateAdditional" | wc -l ;  # 0 — generated VO validation hooks excluded
 grep -r "HasConversion" Acl/src --include="*.cs" | wc -l ;                               # 0 — conventions, not manual converters
 grep -r "ApplyTrellisConventions" Acl/src --include="*.cs" | wc -l ;                     # 1
-grep -r "ICommand<Result" Application/src --include="*.cs" | wc -l ;                     # 11 — one per command
-grep -rE "\[Http" Api/src --include="*.cs" | wc -l ;                                     # 16 — 14 spec endpoints + 2 hidden GET-by-id helper routes
-grep -rn "SaveChanges" Application/src Acl/src --include="*.cs" | wc -l ;                # only XML-doc mentions; zero actual calls (the UoW behavior commits)
+grep -r "ActorCommandHandler\|ActorResourceCommandHandler" Application/src --include="*.cs"
+grep -r "TryCreatePageRequest\|PageUrl" Api/src --include="*.cs"
+grep -r "SeekDefinition\|ToPageAsync" Acl/src --include="*.cs"
+grep -rn "SaveChanges" Application/src --include="*.cs"                                 # no handler-owned commits
 ```
+
+These searches are navigation aids, not correctness proofs or fixed file-count assertions.
+Use behavioral tests for checked-actor identity, one resource load, denied dispatches,
+coded query-location 422 responses, versioned next-link round-trips, and inbox redelivery.
+Microsoft.Testing.Platform runs these suites: use `--solution`/`--project`, not VSTest
+`--filter` or `--nologo`.
 
 ### Supplementary: feature-addition (Step 8)
 
@@ -367,7 +377,7 @@ Score these separately from the core 57 — they measure whether the AI can **ev
 - **Zero regressions** — every pre-existing test still passes.
 - `Returned` added to `OrderStatus`; state machine gains `Delivered → Returned` only.
 - `ReturnReason` value object with `TryCreate` (10–500 chars).
-- `DeliveredAt` / `ReturnedAt` are `Maybe<DateTime>`, set on the right transitions.
+- `DeliveredAt` / `ReturnedAt` are `Maybe<DateTimeOffset>`, set on the right transitions.
 - 30-day window enforced and **testable** (injectable clock).
 - Stock released on return (reusing the cancel pattern).
 - `OrderReturnedEvent` raised; `orders:return` permission added; `ReturnOrderCommand` wired through the full pipeline.

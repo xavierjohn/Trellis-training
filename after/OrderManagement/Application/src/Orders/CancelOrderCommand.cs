@@ -1,10 +1,11 @@
-namespace OrderManagement.Application.Orders;
+﻿namespace OrderManagement.Application.Orders;
 
 using FluentValidation;
 using Mediator;
 using OrderManagement.Application.Products;
 using OrderManagement.Domain;
 using Trellis.Authorization;
+using Trellis.Mediator;
 
 /// <summary>
 /// Cancels an order. Permits {Draft, Submitted, Approved} → Cancelled.
@@ -19,9 +20,8 @@ using Trellis.Authorization;
 /// <para>
 /// Implementing <see cref="IIdentifyResource{Order, OrderId}"/> opts this command into the
 /// shared loader, so we do not need a per-command <c>IResourceLoader</c>. The handler then
-/// reads the same loaded <see cref="Order"/> via the v4 typed
-/// <see cref="IAuthorizedResource{TMessage, TResource}"/> accessor instead of a duplicate
-/// repository fetch.
+/// receives that same loaded <see cref="Order"/> and the checked actor through
+/// <see cref="ActorResourceCommandHandler{TCommand, TResource, TResponse}"/>.
 /// </para>
 /// </summary>
 public sealed record CancelOrderCommand(OrderId OrderId)
@@ -40,10 +40,9 @@ public sealed record CancelOrderCommand(OrderId OrderId)
     public IResult Authorize(Actor actor, Order resource) =>
         Result.Ensure(
             actor.IsOwner(resource.CreatedByActorId) || actor.HasPermission(Permissions.OrdersReadAll),
-            new Error.Forbidden(
-                PolicyId: "orders.cancel.owner-or-admin",
-                Resource: ResourceRef.For<Order>(OrderId))
-            { Detail = "Only the order's creator (or an actor with orders:read-all) may cancel it." });
+            () => Error.Forbidden.For<Order>(
+                "orders.cancel.owner-or-admin", id: OrderId,
+                detail: "Only the order's creator (or an actor with orders:read-all) may cancel it."));
 }
 
 public sealed class CancelOrderCommandValidator : AbstractValidator<CancelOrderCommand>
@@ -51,44 +50,16 @@ public sealed class CancelOrderCommandValidator : AbstractValidator<CancelOrderC
     public CancelOrderCommandValidator() => RuleFor(c => c.OrderId).NotNull();
 }
 
-public sealed class CancelOrderCommandHandler : ICommandHandler<CancelOrderCommand, Result<Order>>
+public sealed class CancelOrderCommandHandler(IProductRepository productRepository, TimeProvider timeProvider)
+    : ActorResourceCommandHandler<CancelOrderCommand, Order, Result<Order>>
 {
-    private readonly IAuthorizedResource<CancelOrderCommand, Order> _authorizedOrder;
-    private readonly IOrderRepository _orderRepository;
-    private readonly IProductRepository _productRepository;
-    private readonly TimeProvider _timeProvider;
-
-    public CancelOrderCommandHandler(
-        IAuthorizedResource<CancelOrderCommand, Order> authorizedOrder,
-        IOrderRepository orderRepository,
-        IProductRepository productRepository,
-        TimeProvider timeProvider)
+    protected override async ValueTask<Result<Order>> Handle(
+        CancelOrderCommand command, Actor actor, Order order, CancellationToken cancellationToken)
     {
-        _authorizedOrder = authorizedOrder;
-        _orderRepository = orderRepository;
-        _productRepository = productRepository;
-        _timeProvider = timeProvider;
-    }
-
-    public async ValueTask<Result<Order>> Handle(CancelOrderCommand command, CancellationToken cancellationToken)
-    {
-        // Reuse the SAME instance the resource-authorization pipeline already loaded
-        // (cookbook Recipe 31). Avoids a duplicate Order load when the typed accessor
-        // is populated; falls back to the repository when running under fixtures (e.g.
-        // unit tests) that bypass the resource-authorization pipeline.
-        if (!_authorizedOrder.TryGetResource(out var order))
-        {
-            var maybe = await _orderRepository.FindByIdAsync(command.OrderId, cancellationToken);
-            if (!maybe.TryGetValue(out order))
-                return Result.Fail<Order>(new Error.NotFound(ResourceRef.For<Order>(command.OrderId))
-                { Detail = $"Order {command.OrderId} not found." });
-        }
-
-        // Cancel may release stock for Submitted/Approved orders; preload the products.
         var productIds = order.LineItems.Select(li => li.ProductId).Distinct().ToList();
-        var products = await _productRepository.FindManyByIdAsync(productIds, cancellationToken);
+        var products = await productRepository.FindManyByIdAsync(productIds, cancellationToken).ConfigureAwait(false);
         var productsById = products.ToDictionary(p => p.Id);
 
-        return order.Cancel(productsById, _timeProvider).Map(_ => order);
+        return order.Cancel(productsById, timeProvider).Map(_ => order);
     }
 }

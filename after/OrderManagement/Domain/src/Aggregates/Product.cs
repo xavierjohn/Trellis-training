@@ -21,9 +21,7 @@ public partial class Product : Aggregate<ProductId>
         Sku = sku;
         UnitPrice = unitPrice;
 
-        if (!StockQuantity.TryCreate(0).TryGetValue(out var initialStock))
-            throw new InvalidOperationException("StockQuantity.TryCreate(0) must succeed — 0 is a valid stock quantity.");
-        StockQuantity = initialStock;
+        StockQuantity = StockQuantity.Create(0);
     }
 
     /// <summary>
@@ -33,7 +31,8 @@ public partial class Product : Aggregate<ProductId>
     {
         if (quantity <= 0)
             return Result.Fail<StockQuantity>(
-                Error.InvalidInput.ForField("quantity", "product.add-stock.non-positive", "Quantity to add must be positive."));
+                Error.InvalidInput.ForField(
+                    "product.add-stock.non-positive", "quantity", detail: "Quantity to add must be positive."));
 
         return StockQuantity.TryCreate(StockQuantity.Value + quantity)
             .Tap(updated => StockQuantity = updated);
@@ -46,13 +45,14 @@ public partial class Product : Aggregate<ProductId>
     {
         if (quantity <= 0)
             return Result.Fail<StockQuantity>(
-                Error.InvalidInput.ForField("quantity", "product.reserve-stock.non-positive", "Quantity to reserve must be positive."));
+                Error.InvalidInput.ForField(
+                    "product.reserve-stock.non-positive", "quantity", detail: "Quantity to reserve must be positive."));
 
         if (StockQuantity.Value < quantity)
             return Result.Fail<StockQuantity>(
                 Error.InvalidInput.ForRule(
                     "product.insufficient-stock",
-                    $"Product '{ProductName.Value}' has insufficient stock: requested {quantity}, available {StockQuantity.Value}."));
+                    detail: $"Product '{ProductName.Value}' has insufficient stock: requested {quantity}, available {StockQuantity.Value}."));
 
         return StockQuantity.TryCreate(StockQuantity.Value - quantity)
             .Tap(updated => StockQuantity = updated);

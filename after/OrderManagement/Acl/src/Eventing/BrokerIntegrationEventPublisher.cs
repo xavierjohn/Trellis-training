@@ -1,4 +1,4 @@
-namespace OrderManagement.AntiCorruptionLayer.Eventing;
+﻿namespace OrderManagement.AntiCorruptionLayer.Eventing;
 
 using System.Text.Json;
 using OrderManagement.Application.IntegrationEvents;
@@ -12,19 +12,20 @@ using Trellis.Mediator;
 internal sealed class BrokerIntegrationEventPublisher(InMemoryEventBus bus) : IIntegrationEventPublisher
 {
     /// <inheritdoc />
-    public async ValueTask PublishAsync(IIntegrationEvent integrationEvent, CancellationToken cancellationToken)
+    public async ValueTask PublishAsync(OutboundIntegrationMessage message, CancellationToken cancellationToken)
     {
+        var integrationEvent = message.Event;
         var (messageType, bytes) = integrationEvent switch
         {
             OrderSubmittedIntegrationEvent e => (
                 OrderSubmittedIntegrationEvent.MessageType,
-                JsonSerializer.SerializeToUtf8Bytes(e, IntegrationEventSerialization.Options)),
+                JsonSerializer.SerializeToUtf8Bytes(BrokerEnvelope<OrderSubmittedIntegrationEvent>.From(message, e), IntegrationEventSerialization.Options)),
             OrderCancelledIntegrationEvent e => (
                 OrderCancelledIntegrationEvent.MessageType,
-                JsonSerializer.SerializeToUtf8Bytes(e, IntegrationEventSerialization.Options)),
+                JsonSerializer.SerializeToUtf8Bytes(BrokerEnvelope<OrderCancelledIntegrationEvent>.From(message, e), IntegrationEventSerialization.Options)),
             _ => throw new NotSupportedException($"No broker mapping for integration event type '{integrationEvent.GetType().Name}'."),
         };
 
-        await bus.PublishAsync(messageType, bytes, cancellationToken);
+        await bus.PublishAsync(messageType, bytes, cancellationToken).ConfigureAwait(false);
     }
 }

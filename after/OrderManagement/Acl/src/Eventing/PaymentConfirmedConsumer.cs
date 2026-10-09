@@ -1,4 +1,4 @@
-namespace OrderManagement.AntiCorruptionLayer.Eventing;
+﻿namespace OrderManagement.AntiCorruptionLayer.Eventing;
 
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
@@ -14,14 +14,11 @@ internal sealed class PaymentConfirmedConsumer(InMemoryEventBus bus, IInboxDispa
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var message in bus.SubscribeAsync(PaymentConfirmedIntegrationEvent.MessageType, stoppingToken))
+        await foreach (var message in bus.SubscribeAsync(PaymentConfirmedIntegrationEvent.MessageType, stoppingToken).ConfigureAwait(false))
         {
-            var evt = JsonSerializer.Deserialize<PaymentConfirmedIntegrationEvent>(message, IntegrationEventSerialization.Options);
-            if (evt is null)
-                continue;
-
-            var envelope = new IntegrationEnvelope(evt.EventId, evt) { MessageSource = "payments" };
-            await inbox.DispatchAsync(envelope, stoppingToken);
+            var envelope = JsonSerializer.Deserialize<BrokerEnvelope<PaymentConfirmedIntegrationEvent>>(message, IntegrationEventSerialization.Options)
+                ?? throw new JsonException("A payment message must contain a broker envelope.");
+            await inbox.DispatchAsync(envelope.ToInboxEnvelope(), stoppingToken).ConfigureAwait(false);
         }
     }
 }

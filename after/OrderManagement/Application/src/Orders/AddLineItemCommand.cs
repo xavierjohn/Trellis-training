@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Orders;
+﻿namespace OrderManagement.Application.Orders;
 
 using FluentValidation;
 using Mediator;
@@ -25,23 +25,15 @@ public sealed class AddLineItemCommandValidator : AbstractValidator<AddLineItemC
     }
 }
 
-public sealed class AddLineItemCommandHandler : ICommandHandler<AddLineItemCommand, Result<Order>>
+public sealed class AddLineItemCommandHandler(IOrderRepository orderRepository, IProductRepository productRepository)
+    : ICommandHandler<AddLineItemCommand, Result<Order>>
 {
-    private readonly IOrderRepository _orderRepository;
-    private readonly IProductRepository _productRepository;
-
-    public AddLineItemCommandHandler(IOrderRepository orderRepository, IProductRepository productRepository)
-    {
-        _orderRepository = orderRepository;
-        _productRepository = productRepository;
-    }
-
     public async ValueTask<Result<Order>> Handle(AddLineItemCommand command, CancellationToken cancellationToken)
     {
-        var orderMaybe = await _orderRepository.FindByIdAsync(command.OrderId, cancellationToken);
+        var orderMaybe = await orderRepository.FindByIdAsync(command.OrderId, cancellationToken).ConfigureAwait(false);
         if (!orderMaybe.TryGetValue(out var order))
-            return Result.Fail<Order>(new Error.NotFound(ResourceRef.For<Order>(command.OrderId))
-            { Detail = $"Order {command.OrderId} not found." });
+            return Result.Fail<Order>(Error.NotFound.For<Order>(
+                id: command.OrderId, detail: $"Order {command.OrderId} not found."));
 
         // Optimistic concurrency: If-Match is required. RequireETag yields 428 when the caller
         // sent no validator and 412 when the supplied ETag no longer matches the loaded order.
@@ -49,10 +41,10 @@ public sealed class AddLineItemCommandHandler : ICommandHandler<AddLineItemComma
         if (precondition.IsFailure)
             return precondition;
 
-        var productMaybe = await _productRepository.FindByIdAsync(command.ProductId, cancellationToken);
+        var productMaybe = await productRepository.FindByIdAsync(command.ProductId, cancellationToken).ConfigureAwait(false);
         if (!productMaybe.TryGetValue(out var product))
-            return Result.Fail<Order>(new Error.NotFound(ResourceRef.For<Product>(command.ProductId))
-            { Detail = $"Product {command.ProductId} not found." });
+            return Result.Fail<Order>(Error.NotFound.For<Product>(
+                id: command.ProductId, detail: $"Product {command.ProductId} not found."));
 
         return order.AddLineItem(product.Id, product.ProductName, command.Quantity, product.UnitPrice)
             .Map(_ => order);

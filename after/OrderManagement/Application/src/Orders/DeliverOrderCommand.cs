@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Orders;
+﻿namespace OrderManagement.Application.Orders;
 
 using FluentValidation;
 using Mediator;
@@ -17,20 +17,13 @@ public sealed class DeliverOrderCommandValidator : AbstractValidator<DeliverOrde
     public DeliverOrderCommandValidator() => RuleFor(c => c.OrderId).NotNull();
 }
 
-public sealed class DeliverOrderCommandHandler : ICommandHandler<DeliverOrderCommand, Result<Order>>
+public sealed class DeliverOrderCommandHandler(IOrderRepository repository, TimeProvider timeProvider)
+    : ICommandHandler<DeliverOrderCommand, Result<Order>>
 {
-    private readonly IOrderRepository _repository;
-    private readonly TimeProvider _timeProvider;
-
-    public DeliverOrderCommandHandler(IOrderRepository repository, TimeProvider timeProvider)
-    {
-        _repository = repository;
-        _timeProvider = timeProvider;
-    }
-
     public async ValueTask<Result<Order>> Handle(DeliverOrderCommand command, CancellationToken cancellationToken) =>
-        await _repository.FindByIdAsync(command.OrderId, cancellationToken)
-            .ToResultAsync(new Error.NotFound(ResourceRef.For<Order>(command.OrderId))
-            { Detail = $"Order {command.OrderId} not found." })
-            .CheckAsync(order => order.Deliver(_timeProvider));
+        await repository.FindByIdAsync(command.OrderId, cancellationToken)
+            .ToResultAsync(() => Error.NotFound.For<Order>(
+                id: command.OrderId, detail: $"Order {command.OrderId} not found."))
+            .CheckAsync(order => order.Deliver(timeProvider))
+            .ConfigureAwait(false);
 }

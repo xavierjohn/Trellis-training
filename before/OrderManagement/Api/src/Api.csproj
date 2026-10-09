@@ -4,22 +4,30 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Asp.Versioning.OpenApi" />
-    <!-- Forces the patched Microsoft.OpenApi (see Directory.Packages.props) over the vulnerable
-         2.0.0 pulled transitively by Microsoft.AspNetCore.OpenApi / Asp.Versioning.OpenApi. -->
-    <PackageReference Include="Microsoft.OpenApi" />
+    <PackageReference Include="Azure.Identity" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Trellis.Asp" />
     <PackageReference Include="Trellis.Asp.ApiVersioning" />
+    <PackageReference Include="Trellis.Asp.Idempotency.Cosmos" />
+    <PackageReference Include="Trellis.ServiceDefaults" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
     <PackageReference Include="Scalar.AspNetCore" />
     <PackageReference Include="Scalar.AspNetCore.Microsoft" />
+    <PackageReference Include="Trellis.ServiceLevelIndicators.Asp" />
     <PackageReference Include="Trellis.ServiceLevelIndicators.Asp.ApiVersioning" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Acl\src\AntiCorruptionLayer.csproj" />
     <ProjectReference Include="..\..\Application\src\Application.csproj" />
+    <InternalsVisibleTo Include="Api.Tests" />
   </ItemGroup>
 
-</Project>
+    <Target Name="RejectAzureSqlite" BeforeTargets="CollectPackageReferences;PrepareForBuild"
+          Condition="'none' == 'azure' And 'sqlite' == 'sqlite'">
+    <Error Text="Azure deployment requires --database postgres or --database sqlserver. SQLite is not supported on Azure." />
+  </Target>
+  </Project>

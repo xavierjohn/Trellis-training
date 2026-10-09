@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Orders;
+﻿namespace OrderManagement.Application.Orders;
 
 using FluentValidation;
 using Mediator;
@@ -22,19 +22,13 @@ public sealed class RemoveLineItemCommandValidator : AbstractValidator<RemoveLin
     }
 }
 
-public sealed class RemoveLineItemCommandHandler : ICommandHandler<RemoveLineItemCommand, Result<Order>>
+public sealed class RemoveLineItemCommandHandler(IOrderRepository repository)
+    : ICommandHandler<RemoveLineItemCommand, Result<Order>>
 {
-    private readonly IOrderRepository _repository;
-
-    public RemoveLineItemCommandHandler(IOrderRepository repository) => _repository = repository;
-
-    public async ValueTask<Result<Order>> Handle(RemoveLineItemCommand command, CancellationToken cancellationToken)
-    {
-        var orderMaybe = await _repository.FindByIdAsync(command.OrderId, cancellationToken);
-        if (!orderMaybe.TryGetValue(out var order))
-            return Result.Fail<Order>(new Error.NotFound(ResourceRef.For<Order>(command.OrderId))
-            { Detail = $"Order {command.OrderId} not found." });
-
-        return order.RemoveLineItem(command.LineItemId).Map(_ => order);
-    }
+    public async ValueTask<Result<Order>> Handle(RemoveLineItemCommand command, CancellationToken cancellationToken) =>
+        await repository.FindByIdAsync(command.OrderId, cancellationToken)
+            .ToResultAsync(() => Error.NotFound.For<Order>(
+                id: command.OrderId, detail: $"Order {command.OrderId} not found."))
+            .CheckAsync(order => order.RemoveLineItem(command.LineItemId))
+            .ConfigureAwait(false);
 }

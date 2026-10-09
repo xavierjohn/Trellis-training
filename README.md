@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="docs/images/hero-banner.png" alt="Trellis Training Lab — learn to build enterprise .NET services with AI" width="800"/>
 </p>
 
@@ -47,7 +47,7 @@ Completing a lab shows you, in working code, how Trellis shapes:
 - .NET 10 SDK
 - VS Code or Visual Studio
 - GitHub Copilot (Copilot Chat in VS Code) — or another AI model you want to drive the build
-- The Trellis ASP template: `dotnet new install Trellis.AspTemplate`
+- The course template: `dotnet new install Trellis.Asp.Templates@1.0.151-alpha`
 - Docker Desktop *(optional — for the Aspire Dashboard)*
 - The Trellis Microservices template *(optional — for future multi-service labs)*: `dotnet new install Trellis.Microservices.Templates`
 
@@ -58,11 +58,12 @@ Completing a lab shows you, in working code, how Trellis shapes:
 git clone https://github.com/xavierjohn/Trellis-training.git
 
 # 2. Install the Trellis template
-dotnet new install Trellis.AspTemplate
+dotnet new install Trellis.Asp.Templates@1.0.151-alpha
 
 # 3. Open the operator guide for the lab you want to learn:
 #    - HTTP CRUD + state machine:  docs/training-lab.md          (Order Management — start here)
 #    - Background worker:          docs/training-lab-worker.md    (Subscription Reminder)
+#    - Unversioned HTTP:           docs/training-lab-url-shortener.md (URL Shortener)
 
 # 4. Follow Steps 1-8 in that guide. The implementation itself (Step 4) happens
 #    by pasting the lab spec + checklist into GitHub Copilot — the AI writes the
@@ -70,6 +71,12 @@ dotnet new install Trellis.AspTemplate
 ```
 
 New here? **Start with the Order Management lab ([`docs/training-lab.md`](docs/training-lab.md))** — it's the canonical, fully-documented walkthrough. Prefer to just *read* finished code first? Jump to [Study the reference implementation](#study-the-reference-implementation).
+
+**Course baseline:** ASP template **1.0.151-alpha**, Trellis **3.0.0-alpha.557**, .NET 10.
+Start agents at the generated `AGENTS.md`, then `.agentdocs/README.md` and its required
+`trellis-start-here.md` router. Read recipes and package references on demand rather than
+copying API guidance into `.github`. Order Management and the worker explicitly opt into API
+versioning; the URL shortener uses the template's unversioned default.
 
 ## How a lab works
 
@@ -109,7 +116,23 @@ Each lab targets a different **system shape**, so you learn how Trellis handles 
 Want to read idiomatic Trellis code without running anything? Two complete copies of the Order Management lab are checked in:
 
 - **[`before/OrderManagement/`](before/OrderManagement/)** — the template scaffold you start from (what `dotnet new trellis-asp` gives you: a small sample **Todo** service).
-- **[`after/OrderManagement/`](after/OrderManagement/)** — a complete, passing reference implementation. Start in `Domain/src/` (value objects, aggregates, the order state machine) and follow the layers outward through `Application/src/`, `Acl/src/`, and `Api/src/`.
+- **[`after/OrderManagement/`](after/OrderManagement/)** — the completed reference implementation. Start in `Domain/src/` (value objects, aggregates, the order state machine) and follow the layers outward through `Application/src/`, `Acl/src/`, and `Api/src/`.
+
+The reference uses shipped actor/resource-aware handlers, raw pagination validation,
+typed EF seek definitions, the ServiceDefaults ProblemDetails configuration, and stable
+outbox-to-inbox message identities instead of recreating those mechanisms. The other two
+labs have specs and coverage checklists, not checked-in completed applications.
+
+**Maintaining the checked-in snapshots:** AgentDocs preview.20 targets the Git root.
+Do not run init/sync directly inside these nested solutions. From the Training root,
+run `.\scripts\Test-TrainingGuidance.ps1` to check both isolated exports, or add `-Sync`
+to regenerate their managed guidance. It preserves Training-root `.github`.
+Run `.\scripts\Test-Training.ps1` for course/scaffold drift checks.
+
+Reference documents belong in each snapshot's `.agentdocs/packages`, never in any
+`.github` folder. Thin Copilot instruction pointers and GitHub workflows can remain there.
+When building an older branch, pass `-p:TrellisDisableApiReferenceSync=true` to prevent
+its old package targets from recreating `.github` references.
 
 <p align="center">
   <img src="docs/images/before-after.png" alt="Before and After — from template scaffold to a full Trellis service" width="700"/>
@@ -160,9 +183,8 @@ Trellis-training/
 ## Related repositories
 
 - [`xavierjohn/Trellis`](https://github.com/xavierjohn/Trellis) — the framework you're learning: `Result<T>`, `Maybe<T>`, value objects, DDD primitives, ASP.NET / EF Core / Mediator integration.
-- [`xavierjohn/Trellis.AspTemplate`](https://github.com/xavierjohn/Trellis.AspTemplate) — `dotnet new trellis-asp` single-service Clean Architecture template used by the OM, worker, and URL-shortener labs.
+- [`xavierjohn/Trellis.Templates`](https://github.com/xavierjohn/Trellis.Templates) — publishes both the `trellis-asp` single-service template used by these labs and the `trellis-microservices` template for multi-service projects.
 - [`xavierjohn/Trellis.Microservices`](https://github.com/xavierjohn/Trellis.Microservices) — microservice trust-boundary packages: YARP gateway + consumer-side actor provider.
-- [`xavierjohn/Trellis.Microservices.Template`](https://github.com/xavierjohn/Trellis.Microservices.Template) — `dotnet new trellis-microservices` multi-service Project Tracker template. A future multi-service lab will exercise the gateway + downstream-services topology.
 - [`xavierjohn/Trellis.ServiceLevelIndicators`](https://github.com/xavierjohn/Trellis.ServiceLevelIndicators) — latency SLI metrics library. The OM and URL-shortener labs already emit `Trellis.SLI`-shaped metrics via the framework's middleware.
 - [`xavierjohn/trellis-ai-benchmark`](https://github.com/xavierjohn/trellis-ai-benchmark) — the framework-neutral "does adopting Trellis change AI output?" study: the same spec built with and without Trellis, scored on outcomes.
 

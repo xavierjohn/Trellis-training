@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Orders;
+﻿namespace OrderManagement.Application.Orders;
 
 using OrderManagement.Application.IntegrationEvents;
 using OrderManagement.Domain;
@@ -7,7 +7,7 @@ using Trellis.Mediator;
 /// <summary>
 /// Translates the internal <see cref="OrderCancelledEvent"/> into the stable
 /// <see cref="OrderCancelledIntegrationEvent"/> contract. The collected integration event is
-/// persisted to the outbox in the same transaction as the order change and relayed after commit.
+/// enrolled by the relay after the order commits, atomically with the relay's handler progress.
 /// </summary>
 internal sealed class OrderCancelledTranslator(IIntegrationEventCollector collector) : IDomainEventHandler<OrderCancelledEvent>
 {

@@ -1,6 +1,12 @@
-# Order Management System — Specification
+﻿# Order Management System — Specification
 
-> This specification describes a simplified but realistic Order Management System. It is intended to be given to an AI along with the Trellis Copilot Instructions to generate a working .NET application. The spec focuses on business requirements and outcomes. Implementation patterns come from the Copilot Instructions.
+> This specification describes a simplified Order Management System. Use ASP template 1.0.151-alpha, Trellis alpha.557 and explicit `--api-versioning true`. Start at AGENTS.md and its AgentDocs router, then read the selected recipe bodies and package references directly.
+
+Use shipped scalar generators, code-first error factories/lazy guards, allocation-free
+composite equality, actor-aware handler bases and ServiceDefaults composition instead of
+copying that infrastructure. Draft creation receives the checked actor; cancellation
+receives the checked actor and pipeline-loaded Order. Their protected Handle hooks have
+business-only constructors; tests use real Mediator dispatch and normal resource registrations.
 
 ## 1. Domain Overview
 
@@ -340,10 +346,12 @@ All endpoints return JSON. Error responses follow RFC 9457 (Problem Details). AP
 Every list endpoint returns a **bounded page** — never an unbounded array (an unbounded list is a latent outage at scale):
 
 - **Query parameters:** an optional `limit` (the server clamps it to a maximum; a sensible default applies when omitted) and an optional opaque `cursor`.
-- **Ordering & paging:** cursor (keyset) pagination ordered by the order's id — a time-ordered UUID — used as a stable forward-only seek key; over-fetch by one to determine whether another page exists. Do **not** use OFFSET/skip.
+- **Boundary:** parse raw input with `Request.TryCreatePageRequest()`, not bound nullable cursor/limit parameters. Pass PageRequest through Application/ACL; declare OpenAPI query metadata separately.
+- **Ordering & paging:** typed `SeekDefinition.Ascending<Order, Guid>(order => order.Id.Value)` and `ToPageAsync` own the matching seek/order/over-fetch. Do not duplicate cursor encoding or use OFFSET.
 - **Response body:** a page envelope containing `items`, a `next` cursor link, `requestedLimit`, `appliedLimit`, `deliveredCount`, and `wasCapped`. (The envelope also carries a `previous` slot, but keyset pagination here is forward-only, so it is always null.)
 - **Response headers:** an RFC 8288 `Link` header carrying `rel="next"` when another page exists. Pagination is forward-only, so no `rel="prev"` link is emitted.
-- **Errors:** a malformed `cursor` → 422 (per the framework's invalid-input mapping).
+- **Errors:** absent cursor → first page; empty/whitespace/repeated/malformed cursor → 422 cursor.malformed. Empty/malformed/overflow/repeated limit → 422 format.integer; nonpositive → 422 page-size.out-of-range. Above cap clamps with requested/applied limits preserved.
+- **Locations/links:** `[InputOrigin(InputLocation.Query)]` promotes downstream cursor decoding failures. Common `HttpContext.PageUrl` builds links; the versioned host selects `UseAsp(asp => asp.UseVersionedPageUrls())`. Follow the returned URLs in tests and assert they retain the requested version.
 
 Applies to `GET /api/orders/overdue` and `GET /api/customers/{id}/orders`.
 
@@ -427,10 +435,10 @@ An order cannot be approved until its payment has been confirmed. Payment confir
 
 ### 11.1 Flow
 
-1. A client submits a Draft order (Section 6.7). In the SAME database transaction as the order change, the OrderSubmitted domain event is captured to the outbox and translated to a stable `OrderSubmittedIntegrationEvent` contract. Nothing is published to the broker inside the request, so a submit either fully commits (order + outbox row) or not at all — no lost events, no dual-write.
-2. A background relay publishes committed outbox messages to the message broker after the transaction commits (at-least-once delivery).
+1. Submit commits the Order change and **domain outbox row** atomically. Nothing is published to the broker inside the request.
+2. The relay later translates that domain event to an integration contract; enrollment commits with relay-handler progress, not the original order change. Integration delivery is at least once.
 3. The external payments service observes OrderSubmitted and, once payment clears, publishes a `PaymentConfirmedIntegrationEvent` back onto the broker.
-4. A consumer receives PaymentConfirmed and dispatches it through the idempotent inbox, which de-duplicates redeliveries by event id (per consumer) before invoking the handler.
+4. The consumer deserializes the broker envelope and sends it to IInboxDispatcher. Dedup keys on `(ConsumerId, MessageId)`; dedup row and payment-handler writes commit together.
 5. The handler records the payment on the order (setting PaidAt / PaymentReference / PaidAmount and raising OrderPaidEvent), which unblocks the Submitted → Approved transition (Section 6.8).
 
 ### 11.2 Integration Event Contracts
@@ -441,7 +449,11 @@ Stable, versioned, transport-facing records (camelCase JSON), decoupled from the
 - `OrderCancelledIntegrationEvent(EventId, OrderId, CancelledFromStatus, OccurredAt)` — message type `orders.order-cancelled.v1`.
 - `PaymentConfirmedIntegrationEvent(EventId, OrderId, AmountPaid, PaymentReference, OccurredAt, Currency = "USD")` — message type `payments.payment-confirmed.v1`.
 
-Event ids are deterministic (UUIDv5 over the order id plus a discriminator) so a retried translation yields the same integration event id, aiding consumer de-duplication ("dedupe on business identity, not the transport message id").
+EventId is deterministic business identity (UUIDv5 over OrderId plus discriminator).
+Transport MessageId is distinct: the integration outbox row ID, carried verbatim from
+OutboundIntegrationMessage through the broker envelope to IntegrationEnvelope on redelivery.
+Preserve nullable MessageSource/CausationId/CorrelationId/TraceParent/TraceState too.
+Inbox transport dedup and exact-payment business idempotency protect different boundaries.
 
 ### 11.3 Hardened Consumer Rules
 
@@ -453,7 +465,9 @@ The PaymentConfirmed handler records payment ONLY for a Submitted order whose to
 - Amount does not match the order total → ignored.
 - A conflicting different payment already recorded → ignored (logged as an error).
 
-Because delivery is at-least-once, the handler is idempotent: the inbox de-duplicates by event id, and RecordPayment no-ops an exact duplicate.
+Inbox redelivery deduplicates by transport MessageId, and RecordPayment no-ops an exact
+business duplicate even if a new transport message carries it. Malformed/null broker
+envelopes are explicit transport failures, not silently acknowledged valid payments.
 
 ### 11.4 Development Payment Simulator
 

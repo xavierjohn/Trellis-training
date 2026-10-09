@@ -1,4 +1,4 @@
-namespace OrderManagement.Api.v2026_11_12.Controllers;
+﻿namespace OrderManagement.Api.v2026_11_12.Controllers;
 
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
@@ -10,32 +10,25 @@ using Trellis.Asp.ApiVersioning;
 
 /// <summary>Products controller (spec §6.2, §6.3, §7).</summary>
 [ApiController]
-[Produces("application/json")]
 [Route("api/[controller]")]
-public class ProductsController : ControllerBase
+public class ProductsController(ISender sender) : ControllerBase
 {
-    private readonly ISender _sender;
-
-    public ProductsController(ISender sender) => _sender = sender;
-
     /// <summary>Create a new product. <c>POST /api/products</c>.</summary>
     [HttpPost]
     [Consumes("application/json")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public ValueTask<ActionResult<ProductResponse>> Create(
         [FromBody] CreateProductRequest request,
         CancellationToken cancellationToken) =>
-        _sender.Send(new CreateProductCommand(request.ProductName, request.Sku, request.UnitPrice), cancellationToken)
+        sender.Send(new CreateProductCommand(request.ProductName, request.Sku, request.UnitPrice), cancellationToken)
             .ToHttpResponseAsync(
                 ProductResponse.From,
                 opts => opts
-                    .CreatedAtRoute("Products_GetById", p => new Microsoft.AspNetCore.Routing.RouteValueDictionary
-                    {
-                        ["id"] = p.Id.Value,
-                    })
+                    .CreatedAtRoute("Products_GetById", p => p.Id.Value)
                     .WithVersionedRoute())
             .AsActionResultAsync<ProductResponse>();
 
@@ -52,13 +45,14 @@ public class ProductsController : ControllerBase
     [Consumes("application/json")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<ProductResponse>> AddStock(
         ProductId id,
         [FromBody] AddStockRequest request,
         CancellationToken cancellationToken) =>
-        _sender.Send(new AddStockCommand(id, request.Quantity), cancellationToken)
+        sender.Send(new AddStockCommand(id, request.Quantity), cancellationToken)
             .ToHttpResponseAsync(ProductResponse.From)
             .AsActionResultAsync<ProductResponse>();
 }

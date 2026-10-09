@@ -54,35 +54,29 @@ internal sealed class FakeOrderRepository : IOrderRepository
         _repo.FindByIdAsync(id, cancellationToken);
 
     public Task<Result<Page<Order>>> ListByCustomerPageAsync(
-        CustomerId customerId, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken) =>
-        Task.FromResult(PageInMemory(_repo.GetAll().Where(o => o.CustomerId == customerId), pageSize, cursor));
+        CustomerId customerId, PageRequest pagination, CancellationToken cancellationToken) =>
+        Task.FromResult(PageInMemory(_repo.GetAll().Where(o => o.CustomerId == customerId), pagination));
 
     public Task<Result<Page<Order>>> QueryPageAsync(
-        Specification<Order> specification, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken) =>
-        Task.FromResult(PageInMemory(_repo.GetAll().Where(specification.ToExpression().Compile()), pageSize, cursor));
+        Specification<Order> specification, PageRequest pagination, CancellationToken cancellationToken) =>
+        Task.FromResult(PageInMemory(_repo.GetAll().Where(specification.ToExpression().Compile()), pagination));
 
     public void Add(Order order) => _repo.Add(order);
 
     // Mirrors Trellis' EF ToPageAsync seek semantics in memory so fake-backed handler tests
     // exercise the same cursor / limit / over-fetch behavior as the SQLite adapter.
-    private static Result<Page<Order>> PageInMemory(IEnumerable<Order> source, PageSize pageSize, Cursor? cursor)
+    private static Result<Page<Order>> PageInMemory(IEnumerable<Order> source, PageRequest pagination)
     {
-        Guid? afterId = null;
-        if (cursor is { } c)
+        var codec = CursorCodec.Scalar<Guid>();
+        return pagination.Decode(codec).Map(boundary =>
         {
-            var decoded = CursorCodec.TryDecode<Guid>(c);
-            if (!decoded.TryGetValue(out var id, out var error))
-                return Result.Fail<Page<Order>>(error);
-            afterId = id;
-        }
-
-        var overFetched = source
-            .OrderBy(o => o.Id.Value)
-            .Where(o => afterId is not Guid g || o.Id.Value.CompareTo(g) > 0)
-            .Take(pageSize.Applied + 1)
-            .ToList();
-
-        return Result.Ok(PageBuilder.FromOverFetch(overFetched, pageSize, o => o.Id.Value));
+            var overFetched = source
+                .OrderBy(o => o.Id.Value)
+                .Where(o => boundary.Match(id => o.Id.Value.CompareTo(id) > 0, static () => true))
+                .Take(pagination.Size.Applied + 1)
+                .ToList();
+            return PageBuilder.FromOverFetch(overFetched, pagination.Size, o => codec.Encode(o.Id.Value));
+        });
     }
 }
 
@@ -92,13 +86,7 @@ internal sealed class FakeOrderResourceLoader : Trellis.Authorization.SharedReso
     private readonly IOrderRepository _repository;
     public FakeOrderResourceLoader(IOrderRepository repository) => _repository = repository;
 
-    public override async Task<Result<Order>> GetByIdAsync(OrderId id, CancellationToken cancellationToken)
-    {
-        var maybe = await _repository.FindByIdAsync(id, cancellationToken);
-        return maybe.TryGetValue(out var order)
-            ? Result.Ok(order)
-            : Result.Fail<Order>(new Error.NotFound(ResourceRef.For<Order>(id))
-            { Detail = $"Order {id.Value} not found." });
-    }
+    public override Task<Result<Order>> GetByIdAsync(OrderId id, CancellationToken cancellationToken) =>
+        _repository.FindByIdAsync(id, cancellationToken)
+            .ToResultAsync(() => Error.NotFound.For<Order>(id: id, detail: $"Order {id.Value} not found."));
 }
-

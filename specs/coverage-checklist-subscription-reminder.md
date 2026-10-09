@@ -1,4 +1,4 @@
-# Test Coverage Checklist — Subscription Renewal Reminder Worker (v1)
+﻿# Test Coverage Checklist — Subscription Renewal Reminder Worker (alpha.557 course)
 
 Companion to `specs/subscription-reminder-worker.md`. This checklist makes the expected test coverage explicit and machine-checkable so models stop at "rubric coverage" rather than "representative happy + key failure paths."
 
@@ -12,16 +12,16 @@ The L4 (Tests) score is graded against this minimum subset. Rows outside the min
 
 | § | Minimum row |
 |---|---|
-| §1 | Every scalar VO: `TryCreate` happy path + at least one boundary failure + null/empty failure |
+| §1 | Every scalar VO: valid construction and applicable bounds; explicitly opt into required/non-default rules rather than assuming scalar bases reject defaults. |
 | §1 | Reused Trellis built-ins (`EmailAddress`, `PhoneNumber`) integrate cleanly into `Subscription` — invalid input rejected at aggregate construction. (Do not re-test the built-ins' internal pattern rules.) |
 | §2 | Every state-machine transition: happy path + side-effect verified + domain event raised |
 | §2 | Every invalid transition: `Result.Fail` with `Error.InvalidInput`; no state mutation |
 | §3 | `Subscription`: `RenewsAt <= StartedAt` rejected; `MarkInactive` idempotent |
-| §3 | `JobRun.Complete`: each counter combination derives the correct `Outcome` (including `SkippedBudget > 0` → `PartiallyFailed`) |
+| §3 | `JobRun.Complete`: outcomes are mutually exclusive; unattempted work gives `PartiallyFailed` except when the attempted prefix has failures and zero dispatches, which gives `Failed` |
 | §3 | `JobRun` counter invariant: `Dispatched + SoftFailed + HardFailed + SkippedDuplicate + SkippedInactive + SkippedBudget == DueCount` on every completed tick (normal, budget-exhausted, cancelled, fail-fast) |
 | §4 | `RunJobTickCommand`: happy-path batch + mixed-outcome batch + wall-clock budget + fail-fast |
 | §4 | `DispatchReminderCommand`: every branch in §6.2 of the spec, including the retry path with `ExistingAttemptId = Some(...)` |
-| §4 | Fail-fast leaves no `Pending` row: after `Error.AuthenticationRequired`, the acquired attempt is persisted as `SoftFailed` (not `Pending`) and the next tick retries it |
+| §4 | Fail-fast leaves no Pending row: SoftFailed below cap (recoverable next tick), HardFailed at cap; durable JobRun/attempt state through leaf and outer FailAfterCommit. |
 | §4 | Domain event pipeline: `ReminderDispatchedDomainEvent` raised in a tick reaches a registered `IDomainEventHandler<T>` in the worker scope |
 | §5 | Each Trellis `Error` type listed in spec §7 maps to the correct category (Transient / Permanent / Fail-fast). Hand-rolled parallel Transient/Permanent enums are a deduction. |
 | §6 | Composite unique-key violation produces `Skipped(Duplicate)`, not an exception |
@@ -41,6 +41,10 @@ Everything below is required for "test-complete" but not individually scored by 
 ## 1. Scalar value objects (`Domain/tests`)
 
 For every scalar VO declared in the spec — `PlanName`, `ProviderMessageId`, `FailureReason`, and the strongly-typed identity types (`SubscriptionId`, `SubscriberId`, `PlanId`, `DispatchAttemptId`, `JobRunId`):
+
+Length/format rows apply only where declared by the domain. Scalar bases are lenient;
+use documented attributes for required/non-default bounds and retain inherited factories,
+equality and converters. Test missing required references at their owning input boundary.
 
 | Coverage | Required |
 |---|---|
@@ -82,7 +86,9 @@ For every transition on `DispatchAttempt` declared in spec §4:
 | `JobRun.Complete` → `Succeeded` | counters all zero failures and `SkippedBudgetCount = 0` → `Outcome = Succeeded` |
 | `JobRun.Complete` → `PartiallyFailed` (failures) | at least one dispatched and at least one failed → `Outcome = PartiallyFailed` |
 | `JobRun.Complete` → `PartiallyFailed` (budget) | at least one dispatched, zero failures, `SkippedBudgetCount > 0` → `Outcome = PartiallyFailed` (budget blocks `Succeeded`) |
+| `JobRun.Complete` → `PartiallyFailed` (no attempted items) | due items exist, all skipped for budget/cancellation → PartiallyFailed, counter invariant holds |
 | `JobRun.Complete` → `Failed` (no successes) | zero dispatched and at least one hard/soft failure → `Outcome = Failed` |
+| `JobRun.Complete` → `Failed` (failed prefix + unattempted work) | DueCount=2, DispatchedCount=0, HardFailedCount=1 (or SoftFailedCount=1), SkippedBudgetCount=1, FailureSummary=None → only Failed; counter invariant holds |
 | `JobRun.FailFast` | `Outcome = Failed`, `FailureSummary` set, `CompletedAt` set |
 | `JobRun` counter monotonicity | counters never decrement |
 
@@ -95,15 +101,20 @@ For `RunJobTickCommand`:
 | Happy path — empty due batch | `JobRun.Outcome = Succeeded`; counters all zero; one tick log emitted |
 | Happy path — all dispatched | `JobRun.Outcome = Succeeded`; `DispatchedCount` matches due count |
 | Mixed outcomes | counters match: `Dispatched + SoftFailed + HardFailed + SkippedDuplicate + SkippedInactive + SkippedBudget == DueCount` (per spec §3.3 invariant) |
-| Wall-clock budget exceeded mid-batch | dispatch loop stops; `SkippedBudgetCount == DueCount - attemptedCount`; `JobRun.Outcome = PartiallyFailed`; remaining items not attempted (verified via fake gateway call count) |
+| Wall-clock budget exceeded mid-batch | dispatch loop stops; `SkippedBudgetCount == DueCount - attemptedCount`; outcome follows spec §3.3; remaining items not attempted (verified via fake gateway call count) |
 | Wall-clock budget exceeded with all-success attempted prefix | `SkippedBudgetCount > 0` forces `PartiallyFailed` even when `SoftFailedCount = HardFailedCount = 0` |
+| Wall-clock budget exceeded with all-failed attempted prefix | zero dispatched, at least one failed, unattempted remainder counted → Failed, not PartiallyFailed |
 | Fail-fast on `Error.AuthenticationRequired` | tick halts at the offending item; `JobRun.Outcome = Failed`; `FailureSummary` populated; subsequent items not attempted; `SkippedBudgetCount` includes the unattempted remainder so the invariant holds |
-| Fail-fast leaves no `Pending` row | the attempt acquired for the offending item is persisted as `SoftFailed` (not `Pending`); on a subsequent tick (with the gateway un-stubbed) the same row transitions through `Pending → Dispatched` and no new row is inserted |
-| Cancellation token signalled | dispatch loop exits; `SkippedBudgetCount` includes the unattempted remainder; `JobRun.Outcome = PartiallyFailed`; `CompletedAt` set |
+| Fail-fast leaves no Pending row | below cap persist SoftFailed and recover with the same row next tick; at cap persist terminal HardFailed |
+| Cancellation token signalled | dispatch loop exits; `SkippedBudgetCount` includes the unattempted remainder; outcome follows spec §3.3; `CompletedAt` set |
+| Cancellation after a failed attempted prefix | zero dispatched, at least one failed, unattempted remainder counted → Failed; bounded cleanup persists the state |
 | Per-tick DI scope | each tick resolves handlers from a fresh scope (assert by registering a scoped marker service and verifying a different instance per tick) |
 | Time source | `TimeProvider.GetUtcNow()` used to populate `tickStartedAt` (assert by advancing `FakeTimeProvider` and checking persisted `JobRun.StartedAt`) |
 | `SystemActor` resolution in tick scope | `IActorProvider.GetCurrentActorAsync()` returns `Maybe.From(SystemActor)` inside the tick (where `HttpContext` is null); permissions include `reminders:dispatch` |
-| Domain event pipeline | a test `IDomainEventHandler<ReminderDispatchedDomainEvent>` registered in DI observes one event per successful dispatch; the worker must not bypass `IDomainEventPublisher` / `DomainEventDispatchBehavior` |
+| Domain event pipeline | successful owning tick publishes one event per dispatch after commit, none on deferred inner commits; failed-result delivery uses outbox/follow-up, not ordinary in-process dispatch |
+| Durable failure boundary | leaf and outer FailAfterCommit preserve attempt/job changes; failed commit surfaces its own error instead of a success or the old gateway error |
+| Worker harness | WorkerHarness owns worker registration; production Mediator/event registrations supplied; ready after delay registration, fake-time advancement and named/event barriers, no sleeps |
+| Named tick cursors | use global LastTickIndexOf(name) or prior wait result; interleaved signal names do not break next-tick waits |
 
 For `DispatchReminderCommand`:
 
@@ -120,7 +131,8 @@ For `DispatchReminderCommand`:
 
 ## 5. Gateway error mapping (`Application/tests`)
 
-For each gateway `Error` listed in spec §7. The implementation must classify using existing Trellis `Error` types — hand-rolled parallel Transient/Permanent enums are not acceptable.
+For each §7 gateway Error, use shipped `error.Classify()` / RetryClassification. No
+local classifier or parallel enum. These tests assert the application's state/counter mapping.
 
 | Coverage | Required |
 |---|---|
@@ -128,25 +140,30 @@ For each gateway `Error` listed in spec §7. The implementation must classify us
 | Gateway returns `Error.Unavailable(...)` AND retry available (`RetryCount < 4`) | classified Transient; `DispatchAttempt → SoftFailed`; `RetryCount` incremented; metric `reminders.failed.total{category=transient}` incremented |
 | Gateway returns `Error.RateLimited(RetryAdvice)` | classified Transient (same behaviour as `Unavailable`) |
 | Gateway returns `Error.Unexpected(...)` | classified Transient (same behaviour as `Unavailable`) |
-| Gateway returns `Error.TransportFault(...)` | classified Transient (same behaviour as `Unavailable`) |
+| Gateway returns opaque `Error.TransportFault(...)` | classified Permanent; HardFailed |
+| Retryable network fault at gateway boundary | normalized to Unavailable, classified Transient |
 | Gateway returns Transient `Error` AND retry exhausted (`RetryCount == 4`) | `DispatchAttempt → HardFailed` with reason `"transient retries exhausted"`; metric `reminders.failed.total{category=retries-exhausted}` incremented |
 | Gateway returns `Error.InvalidInput(...)` | classified Permanent; `DispatchAttempt → HardFailed`; metric `reminders.failed.total{category=permanent}` incremented |
 | Gateway returns `Error.InvariantViolation(...)` | classified Permanent (same behaviour as `InvalidInput`) |
 | Gateway returns `Error.Forbidden(...)` | classified Permanent (gateway's credentials valid but recipient refused) |
 | Gateway returns `Error.AuthenticationRequired(...)` | orchestrator fail-fast; `JobRun.Outcome = Failed` |
-| Gateway throws unexpected exception | exception caught and translated to `Result.Fail(Error.Unexpected(...))` (not allowed to bubble out of the handler) |
+| Gateway throws unexpected exception | adapter logs/maps safe Error.Unexpected; cancellation propagates separately |
 | Gateway respects `CancellationToken` | when token is signalled mid-call, handler observes the cancellation cleanly |
-| Classification helper location | classification logic is co-located with `DispatchReminderCommand` in a single helper, not duplicated across handlers (verified by code-shape inspection or by parameterised test driving every `Error` type through one entry point) |
+| Shipped classification | Classify() drives decisions, no copied taxonomy; aggregate mixed classifications obey shipped maximum-severity behavior |
 
 ## 6. Idempotency (`Application/tests` + `Acl/tests`)
 
 | Coverage | Required |
 |---|---|
-| Storage-layer unique constraint | duplicate insert of `(SubscriptionId, Tier, Channel)` raises EF Core unique-constraint violation; handler catches and reports `Skipped(Duplicate)` |
+| Storage-layer unique constraint | clean-context TryInsertUniqueAsync returns Conflict/FaultCodes.DuplicateKey; adapter reports Skipped(Duplicate) |
 | Cross-tick idempotency | tick 1 dispatches; tick 2 queries due reminders and excludes the already-`Dispatched` triple (`ExistingAttemptId = None` would not be produced) |
 | Retry idempotency | tick 1 produces `SoftFailed`; tick 2 retries via `ExistingAttemptId = Some(id)`; only one row exists per triple after both ticks (no orphan `SoftFailed` left behind) |
-| First-attempt race | two simulated concurrent first-attempt inserts for the same triple → one succeeds; the other catches the unique-constraint violation and reports `Skipped(Duplicate)` |
+| First-attempt race | two separate clean contexts insert the same triple → one claim, one DuplicateSkip; no duplicate gateway send |
 | Fail-fast preserves prior dispatches in same tick | dispatches before the `AuthenticationRequired` item are persisted and visible after the tick aborts |
+| Claim context isolation | pending JobRun/attempt mutations are not present in the claim helper's tracker; no dirty-context invocation |
+| Duplicate cleanup | losing claim is detached; a subsequent save cannot flush it again |
+| Non-duplicate failures | FK/concurrency/infrastructure/cancellation faults are not reported as duplicate success |
+| Cancellation durability | bounded non-cancelled cleanup persists final counters and processed attempt states; cleanup failure is surfaced |
 
 ## 7. HTTP endpoints (`Api/tests`)
 
@@ -163,8 +180,8 @@ For each of the two HTTP endpoints in spec §8:
 | `GET /admin/job-runs/{id}` unauthenticated | 401 with ProblemDetails body (`Error.AuthenticationRequired`); `SystemActor` is **not** granted to anonymous HTTP requests |
 | `GET /admin/job-runs/{id}` authenticated but missing permission | 403 with ProblemDetails body |
 | `GET /admin/job-runs/{id}` missing api-version | 400 (framework-level) |
-| ProblemDetails wrapping | error responses follow RFC 7807 via `AddTrellisProblemDetails` |
-| Auth composition end-to-end | with the worker `IActorProvider` registration in place, the HTTP pipeline still resolves anonymous requests to `Maybe<Actor>.None` and authenticated requests to the bearer-token-derived actor — not `SystemActor` |
+| ProblemDetails wrapping | Result mapping + UseProblemDetails produces RFC 9457 application/problem+json |
+| Auth composition end-to-end | real host with UseWorkerActor: HTTP delegates identity/absence to inner provider; no HttpContext resolves SystemActor. Harness TestActorProvider alone does not prove this. |
 
 ## 8. Observability (`Application/tests` + `Api/tests`)
 

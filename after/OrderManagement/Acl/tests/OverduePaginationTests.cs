@@ -1,4 +1,4 @@
-namespace AntiCorruptionLayer.Tests;
+﻿namespace AntiCorruptionLayer.Tests;
 
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -84,9 +84,9 @@ public class OverduePaginationTests : IDisposable
         do
         {
             var result = await repository.QueryPageAsync(
-                new OverdueOrderSpecification(asOf), PageSize.FromRequested(2), cursor, ct);
+                new OverdueOrderSpecification(asOf), PageRequest.TryCreate(cursor?.Token, 2).Unwrap(), ct);
 
-            result.TryGetValue(out var page, out var error).Should().BeTrue(error?.ToString());
+            var page = result.Unwrap();
             page.AppliedLimit.Should().Be(2);
             page.Items.Count.Should().BeLessThanOrEqualTo(2);
 

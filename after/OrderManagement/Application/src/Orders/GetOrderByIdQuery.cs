@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Orders;
+﻿namespace OrderManagement.Application.Orders;
 
 using Mediator;
 using OrderManagement.Domain;
@@ -11,14 +11,11 @@ public sealed record GetOrderByIdQuery(OrderId OrderId) : IQuery<Result<Order>>,
     public IReadOnlyList<string> RequiredPermissions { get; } = [Permissions.OrdersRead];
 }
 
-public sealed class GetOrderByIdQueryHandler : IQueryHandler<GetOrderByIdQuery, Result<Order>>
+public sealed class GetOrderByIdQueryHandler(IOrderRepository repository) : IQueryHandler<GetOrderByIdQuery, Result<Order>>
 {
-    private readonly IOrderRepository _repository;
-
-    public GetOrderByIdQueryHandler(IOrderRepository repository) => _repository = repository;
-
     public async ValueTask<Result<Order>> Handle(GetOrderByIdQuery query, CancellationToken cancellationToken) =>
-        await _repository.FindByIdAsync(query.OrderId, cancellationToken)
-            .ToResultAsync(new Error.NotFound(ResourceRef.For<Order>(query.OrderId))
-            { Detail = $"Order {query.OrderId} not found." });
+        await repository.FindByIdAsync(query.OrderId, cancellationToken)
+            .ToResultAsync(() => Error.NotFound.For<Order>(
+                id: query.OrderId, detail: $"Order {query.OrderId} not found."))
+            .ConfigureAwait(false);
 }

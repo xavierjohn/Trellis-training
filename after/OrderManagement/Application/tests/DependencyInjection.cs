@@ -7,6 +7,7 @@ using OrderManagement.Application.Orders;
 using OrderManagement.Application.Products;
 using OrderManagement.Domain;
 using Trellis.Authorization;
+using Trellis.Mediator;
 using Trellis.Testing;
 
 public static class DependencyInjection
@@ -46,6 +47,7 @@ public static class DependencyInjection
         services.AddScoped<IOrderRepository, FakeOrderRepository>();
 
         services.AddScoped<SharedResourceLoaderById<Order, OrderId>, FakeOrderResourceLoader>();
+        services.AddSharedResourceAuthorization<CancelOrderCommand, Order, OrderId, Result<Order>>();
         return services;
     }
 }
