@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Orders;
+﻿namespace OrderManagement.Application.Orders;
 
 using FluentValidation;
 using Mediator;
@@ -6,6 +6,7 @@ using OrderManagement.Application.Customers;
 using OrderManagement.Application.Products;
 using OrderManagement.Domain;
 using Trellis.Authorization;
+using Trellis.Mediator;
 
 /// <summary>A line on a <see cref="CreateDraftOrderCommand"/>. Pairs a product with a quantity.</summary>
 public sealed record DraftLineItem(ProductId ProductId, LineItemQuantity Quantity);
@@ -29,6 +30,7 @@ public sealed class CreateDraftOrderCommandValidator : AbstractValidator<CreateD
     {
         RuleFor(c => c.CustomerId).NotNull();
         RuleFor(c => c.LineItems)
+            .Cascade(CascadeMode.Stop)
             .NotNull()
             .NotEmpty().WithMessage("Order must have at least one line item.")
             .Must(HaveNoDuplicateProductIds)
@@ -44,48 +46,31 @@ public sealed class CreateDraftOrderCommandValidator : AbstractValidator<CreateD
         lineItems.Select(li => li.ProductId).Distinct().Count() == lineItems.Count;
 }
 
-public sealed class CreateDraftOrderCommandHandler : ICommandHandler<CreateDraftOrderCommand, Result<Order>>
+public sealed class CreateDraftOrderCommandHandler(
+    IOrderRepository orderRepository,
+    ICustomerRepository customerRepository,
+    IProductRepository productRepository,
+    TimeProvider timeProvider)
+    : ActorCommandHandler<CreateDraftOrderCommand, Result<Order>>
 {
-    private readonly IOrderRepository _orderRepository;
-    private readonly ICustomerRepository _customerRepository;
-    private readonly IProductRepository _productRepository;
-    private readonly IActorProvider _actorProvider;
-    private readonly TimeProvider _timeProvider;
-
-    public CreateDraftOrderCommandHandler(
-        IOrderRepository orderRepository,
-        ICustomerRepository customerRepository,
-        IProductRepository productRepository,
-        IActorProvider actorProvider,
-        TimeProvider timeProvider)
+    protected override async ValueTask<Result<Order>> Handle(
+        CreateDraftOrderCommand command, Actor actor, CancellationToken cancellationToken)
     {
-        _orderRepository = orderRepository;
-        _customerRepository = customerRepository;
-        _productRepository = productRepository;
-        _actorProvider = actorProvider;
-        _timeProvider = timeProvider;
-    }
-
-    public async ValueTask<Result<Order>> Handle(CreateDraftOrderCommand command, CancellationToken cancellationToken)
-    {
-        var customer = await _customerRepository.FindByIdAsync(command.CustomerId, cancellationToken);
+        var customer = await customerRepository.FindByIdAsync(command.CustomerId, cancellationToken).ConfigureAwait(false);
         if (!customer.TryGetValue(out _))
-            return Result.Fail<Order>(new Error.NotFound(ResourceRef.For<Customer>(command.CustomerId))
-            { Detail = $"Customer {command.CustomerId} not found." });
+            return Result.Fail<Order>(Error.NotFound.For<Customer>(
+                id: command.CustomerId, detail: $"Customer {command.CustomerId} not found."));
 
         var requestedIds = command.LineItems.Select(li => li.ProductId).ToList();
-        var products = await _productRepository.FindManyByIdAsync(requestedIds, cancellationToken);
+        var products = await productRepository.FindManyByIdAsync(requestedIds, cancellationToken).ConfigureAwait(false);
         var productsById = products.ToDictionary(p => p.Id);
 
         var missing = requestedIds.FirstOrDefault(id => !productsById.ContainsKey(id));
         if (missing is not null)
-            return Result.Fail<Order>(new Error.NotFound(ResourceRef.For<Product>(missing))
-            { Detail = $"Product {missing} not found." });
+            return Result.Fail<Order>(Error.NotFound.For<Product>(
+                id: missing, detail: $"Product {missing} not found."));
 
-        var actor = (await _actorProvider.GetCurrentActorAsync(cancellationToken))
-            .GetValueOrThrow("Actor must be present; IAuthorize pipeline guarantees this.");
-
-        var order = new Order(command.CustomerId, actor.Id, _timeProvider);
+        var order = new Order(command.CustomerId, actor.Id, timeProvider);
         foreach (var draftLine in command.LineItems)
         {
             var product = productsById[draftLine.ProductId];
@@ -94,7 +79,7 @@ public sealed class CreateDraftOrderCommandHandler : ICommandHandler<CreateDraft
                 return Result.Fail<Order>(addResult.Error!);
         }
 
-        _orderRepository.Add(order);
+        orderRepository.Add(order);
         return Result.Ok(order);
     }
 }

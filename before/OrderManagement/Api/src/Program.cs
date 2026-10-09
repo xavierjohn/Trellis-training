@@ -9,10 +9,15 @@ using Trellis.Asp.Idempotency;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+connectionString ??= "Data Source=todos.db";
+if (string.IsNullOrWhiteSpace(connectionString))
+    throw new InvalidOperationException("Configuration 'ConnectionStrings:DefaultConnection' is required for the selected database provider.");
+
 builder.Services
     .AddPresentation(builder.Environment, builder.Configuration)
     .AddApplication()
-    .AddAntiCorruptionLayer(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=todos.db");
+    .AddAntiCorruptionLayer(connectionString);
 
 var app = builder.Build();
 
@@ -41,15 +46,7 @@ if (app.Environment.IsDevelopment())
         });
 }
 
-// Error-handling pipeline — placed before all downstream middleware so 4xx/5xx responses
-// from anywhere in the pipeline produce an RFC 9457 ProblemDetails body. UseExceptionHandler
-// converts unhandled exceptions (thrown by endpoints, middleware, filters) into 500
-// ProblemDetails via IProblemDetailsService. UseStatusCodePages converts empty-body 4xx/5xx
-// responses written by ASP.NET-native pipeline short-circuits (404 route-miss, 405
-// MethodNotAllowed, 406 NotAcceptable, 413 ContentTooLarge, 415 UnsupportedMediaType) into
-// ProblemDetails as well. The bodies are enriched in DependencyInjection.AddProblemDetails.
-app.UseExceptionHandler();
-app.UseStatusCodePages();
+app.UseTrellisProblemDetails();
 
 app.UseHttpsRedirection();
 
@@ -58,10 +55,13 @@ app.UseHttpsRedirection();
 // idempotency replay) is still counted instead of being silently dropped from the metrics.
 app.UseServiceLevelIndicator();
 
+app.UseAuthentication();
 app.UseAuthorization();
 app.UseTrellisIdempotency();
 app.UseScalarValueValidation();
-app.MapControllers();
+var controllers = app.MapControllers();
+if (!app.Environment.IsDevelopment())
+    controllers.RequireAuthorization();
 // /health is a cross-cutting infra endpoint — it must respond to liveness/readiness probes
 // regardless of which API version a client speaks. Tagging it explicitly api-version-neutral
 // (rather than relying on it being implicitly outside the MVC versioning pipeline) makes
@@ -69,7 +69,9 @@ app.MapControllers();
 // SLI/OpenTelemetry tags, and documents the intent for future readers. We attach the metadata
 // directly because `IsApiVersionNeutral()` requires an associated `WithApiVersionSet(...)`,
 // which doesn't apply to non-versioned endpoints like health checks.
-app.MapHealthChecks("/health").WithMetadata(new ApiVersionNeutralAttribute());
+app.MapHealthChecks("/health")
+    .WithMetadata(new ApiVersionNeutralAttribute())
+    ;
 
 app.Run();
 

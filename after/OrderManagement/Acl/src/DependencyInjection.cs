@@ -32,13 +32,11 @@ public static class DependencyInjection
 
         services.AddTrellisUnitOfWork<AppDbContext>();
 
-        // Transactional outbox: integration events staged by the domain-event translators are
-        // written in the SAME transaction as the aggregate change, then relayed after commit —
-        // no lost events, no dual-write to the broker inside the request.
+        // Domain events commit with the aggregate. The relay translates them later and
+        // enrolls integration messages atomically with its saved translation progress.
         services.AddTrellisOutbox<AppDbContext>();
 
-        // Idempotent inbox: inbound integration events are de-duplicated by event id per consumer,
-        // so a redelivered PaymentConfirmed is processed at most once.
+        // Inbox deduplication uses (ConsumerId, transport MessageId), not the payload EventId.
         services.AddTrellisInbox<AppDbContext>(o => o.ConsumerId = "order-management");
 
         // Route integration events through the in-memory broker instead of the default in-process

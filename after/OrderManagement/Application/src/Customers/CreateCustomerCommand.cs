@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Customers;
+﻿namespace OrderManagement.Application.Customers;
 
 using FluentValidation;
 using Mediator;
@@ -29,19 +29,15 @@ public sealed class CreateCustomerCommandValidator : AbstractValidator<CreateCus
     }
 }
 
-public sealed class CreateCustomerCommandHandler : ICommandHandler<CreateCustomerCommand, Result<Customer>>
+public sealed class CreateCustomerCommandHandler(ICustomerRepository repository)
+    : ICommandHandler<CreateCustomerCommand, Result<Customer>>
 {
-    private readonly ICustomerRepository _repository;
-
-    public CreateCustomerCommandHandler(ICustomerRepository repository) => _repository = repository;
-
     public async ValueTask<Result<Customer>> Handle(CreateCustomerCommand command, CancellationToken cancellationToken)
     {
-        if (await _repository.ExistsByEmailAsync(command.Email, cancellationToken))
-            return Result.Fail<Customer>(new Error.Conflict(
-                ResourceRef.For<Customer>(command.Email.Value),
-                "customer.duplicate-email")
-            { Detail = $"A customer with email '{command.Email.Value}' already exists." });
+        if (await repository.ExistsByEmailAsync(command.Email, cancellationToken).ConfigureAwait(false))
+            return Result.Fail<Customer>(Error.Conflict.For<Customer>(
+                "customer.duplicate-email", id: command.Email.Value,
+                detail: $"A customer with email '{command.Email.Value}' already exists."));
 
         var customer = new Customer(
             command.FirstName,
@@ -49,7 +45,7 @@ public sealed class CreateCustomerCommandHandler : ICommandHandler<CreateCustome
             command.Email,
             command.PhoneNumber,
             command.ShippingAddress);
-        _repository.Add(customer);
+        repository.Add(customer);
         return Result.Ok(customer);
     }
 }

@@ -89,13 +89,13 @@ public partial class Order : Aggregate<OrderId>
             return Result.Fail<LineItem>(
                 Error.InvalidInput.ForRule(
                     "order.not-draft",
-                    $"Cannot add a line item to an order in {Status.Value} status."));
+                    detail: $"Cannot add a line item to an order in {Status.Value} status."));
 
         if (_lineItems.Any(li => li.ProductId == productId))
             return Result.Fail<LineItem>(
                 Error.InvalidInput.ForRule(
                     "order.duplicate-line-item-product",
-                    $"Product {productId.Value} is already in this order. Combine quantities instead."));
+                    detail: $"Product {productId.Value} is already in this order. Combine quantities instead."));
 
         var lineItem = new LineItem(productId, productName, quantity, unitPrice);
         _lineItems.Add(lineItem);
@@ -112,17 +112,17 @@ public partial class Order : Aggregate<OrderId>
             return Result.Fail<Unit>(
                 Error.InvalidInput.ForRule(
                     "order.not-draft",
-                    $"Cannot remove a line item from an order in {Status.Value} status."));
+                    detail: $"Cannot remove a line item from an order in {Status.Value} status."));
 
         var lineItem = _lineItems.FirstOrDefault(li => li.Id == lineItemId);
         if (lineItem is null)
-            return Result.Fail<Unit>(new Error.NotFound(ResourceRef.For<LineItem>(lineItemId.Value.ToString())));
+            return Result.Fail<Unit>(Error.NotFound.For<LineItem>(id: lineItemId));
 
         if (_lineItems.Count == 1)
             return Result.Fail<Unit>(
                 Error.InvalidInput.ForRule(
                     "order.last-line-item",
-                    "Cannot remove the last line item from an order. Cancel the order instead."));
+                    detail: "Cannot remove the last line item from an order. Cancel the order instead."));
 
         _lineItems.Remove(lineItem);
         return Result.Ok();
@@ -137,7 +137,7 @@ public partial class Order : Aggregate<OrderId>
     {
         if (_lineItems.Count == 0)
             return Result.Fail<OrderStatus>(
-                Error.InvalidInput.ForRule("order.no-line-items", "Cannot submit an order without line items."));
+                Error.InvalidInput.ForRule("order.no-line-items", detail: "Cannot submit an order without line items."));
 
         // Two-phase: pre-flight check every reservation before mutating any product.
         // Stateless's Permit transition does not roll back our side effects.
@@ -146,13 +146,13 @@ public partial class Order : Aggregate<OrderId>
         {
             if (!products.TryGetValue(li.ProductId, out var product))
                 return Result.Fail<OrderStatus>(
-                    new Error.NotFound(ResourceRef.For<Product>(li.ProductId.Value.ToString())));
+                    Error.NotFound.For<Product>(id: li.ProductId));
 
             if (product.StockQuantity.Value < li.Quantity.Value)
                 return Result.Fail<OrderStatus>(
                     Error.InvalidInput.ForRule(
                         "product.insufficient-stock",
-                        $"Product '{product.ProductName.Value}' has insufficient stock: requested {li.Quantity.Value}, available {product.StockQuantity.Value}."));
+                        detail: $"Product '{product.ProductName.Value}' has insufficient stock: requested {li.Quantity.Value}, available {product.StockQuantity.Value}."));
 
             reservations.Add((product, li.Quantity.Value));
         }
@@ -189,7 +189,7 @@ public partial class Order : Aggregate<OrderId>
             return Result.Fail<OrderStatus>(
                 Error.InvalidInput.ForRule(
                     "order.not-paid",
-                    "Cannot approve an order before its payment has been confirmed."));
+                    detail: "Cannot approve an order before its payment has been confirmed."));
 
         return _machine.FireResult(Triggers.Approve)
             .Tap(_ => DomainEvents.Add(new OrderApprovedEvent(Id, timeProvider.GetUtcNow())));
@@ -226,7 +226,7 @@ public partial class Order : Aggregate<OrderId>
             {
                 if (!products.TryGetValue(li.ProductId, out _))
                     return Result.Fail<OrderStatus>(
-                        new Error.NotFound(ResourceRef.For<Product>(li.ProductId.Value.ToString())));
+                        Error.NotFound.For<Product>(id: li.ProductId));
             }
         }
 
@@ -264,9 +264,9 @@ public partial class Order : Aggregate<OrderId>
 
             return Result.Fail<Unit>(
                 Error.Conflict.For<Order>(
-                    Id,
                     "order.payment-conflict",
-                    "A different payment was already recorded for this order."));
+                    id: Id,
+                    detail: "A different payment was already recorded for this order."));
         }
 
         PaidAt = confirmedAt;

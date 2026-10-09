@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Orders;
+﻿namespace OrderManagement.Application.Orders;
 
 using OrderManagement.Domain;
 
@@ -13,18 +13,18 @@ public interface IOrderRepository
     /// <summary>
     /// Returns a bounded page of a customer's orders using forward-only cursor (keyset)
     /// pagination ordered by the order's (time-ordered) id. Used by the "list orders by
-    /// customer" query. A malformed <paramref name="cursor"/> yields <c>Error.InvalidInput</c>.
+    /// customer" query. Malformed continuation state yields <c>Error.InvalidInput</c>.
     /// </summary>
     Task<Result<Page<Order>>> ListByCustomerPageAsync(
-        CustomerId customerId, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken);
+        CustomerId customerId, PageRequest pagination, CancellationToken cancellationToken);
 
     /// <summary>
     /// Returns a bounded page of orders matching the specification using forward-only cursor
     /// (keyset) pagination ordered by the order's (time-ordered) id. A malformed
-    /// <paramref name="cursor"/> yields <c>Error.InvalidInput</c>.
+    /// continuation state yields <c>Error.InvalidInput</c>.
     /// </summary>
     Task<Result<Page<Order>>> QueryPageAsync(
-        Specification<Order> specification, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken);
+        Specification<Order> specification, PageRequest pagination, CancellationToken cancellationToken);
 
     /// <summary>Stages an aggregate for insertion. The unit-of-work commits on handler success.</summary>
     void Add(Order order);

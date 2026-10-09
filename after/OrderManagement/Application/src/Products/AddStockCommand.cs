@@ -1,4 +1,4 @@
-namespace OrderManagement.Application.Products;
+﻿namespace OrderManagement.Application.Products;
 
 using FluentValidation;
 using Mediator;
@@ -19,20 +19,19 @@ public sealed class AddStockCommandValidator : AbstractValidator<AddStockCommand
     {
         RuleFor(c => c.ProductId).NotNull();
         RuleFor(c => c.Quantity)
+            .Cascade(CascadeMode.Stop)
             .NotNull()
             .Must(q => q.Value > 0).WithMessage("Quantity must be positive.");
     }
 }
 
-public sealed class AddStockCommandHandler : ICommandHandler<AddStockCommand, Result<Product>>
+public sealed class AddStockCommandHandler(IProductRepository repository)
+    : ICommandHandler<AddStockCommand, Result<Product>>
 {
-    private readonly IProductRepository _repository;
-
-    public AddStockCommandHandler(IProductRepository repository) => _repository = repository;
-
     public async ValueTask<Result<Product>> Handle(AddStockCommand command, CancellationToken cancellationToken) =>
-        await _repository.FindByIdAsync(command.ProductId, cancellationToken)
-            .ToResultAsync(new Error.NotFound(ResourceRef.For<Product>(command.ProductId))
-            { Detail = $"Product {command.ProductId} not found." })
-            .CheckAsync(product => product.AddStock(command.Quantity.Value));
+        await repository.FindByIdAsync(command.ProductId, cancellationToken)
+            .ToResultAsync(() => Error.NotFound.For<Product>(
+                id: command.ProductId, detail: $"Product {command.ProductId} not found."))
+            .CheckAsync(product => product.AddStock(command.Quantity.Value))
+            .ConfigureAwait(false);
 }

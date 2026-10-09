@@ -38,12 +38,12 @@ public partial class ShippingAddress : ValueObject
     public static ShippingAddress Create(Street street, City city, StateRegion state, PostalCode postalCode, Country country) =>
         new(street, city, state, postalCode, country);
 
-    protected override IEnumerable<IComparable?> GetEqualityComponents()
+    protected override void GetEqualityComponents(ref EqualityComponents components)
     {
-        yield return Street;
-        yield return City;
-        yield return State;
-        yield return PostalCode;
-        yield return Country;
+        components.Add(Street);
+        components.Add(City);
+        components.Add(State);
+        components.Add(PostalCode);
+        components.Add(Country);
     }
 }

@@ -1,4 +1,4 @@
-# Trellis Training Lab — Subscription Reminder Worker
+﻿# Trellis Training Lab — Subscription Reminder Worker
 
 > **Learn how Trellis shapes a *non-HTTP* service** — a scheduled `BackgroundService` that wakes on a timer, calls external gateways, classifies their failures, and records per-attempt idempotency state, with only a thin HTTP admin surface for inspection. It's the same framework you met in the OM lab, applied where there are no request/response cycles to hang the logic on.
 >
@@ -19,7 +19,7 @@ A worker that, on every tick, finds subscriptions due for a renewal reminder (by
 ## What you'll learn
 
 - How to host a **`BackgroundService` tick loop** on Trellis and keep it **testable** with `TimeProvider` (never `DateTimeOffset.UtcNow`).
-- **Idempotency via a database unique constraint** on `(SubscriptionId, Tier, Channel)` — insert-then-catch, not read-then-decide — so concurrent or retried ticks never double-dispatch.
+- **Idempotent claim acquisition** with `TryInsertUniqueAsync` in a clean ACL context and a database unique constraint on `(SubscriptionId, Tier, Channel)`; classify `FaultCodes.DuplicateKey`, not provider exceptions in a handler.
 - **Classifying external-gateway failures** as transient (retry next tick → `SoftFailed`) vs. permanent (data error → `HardFailed`) off Trellis's `Error` taxonomy, instead of inventing a parallel enum.
 - **Actor composition** — giving the worker a `SystemActor` **without leaking it into HTTP**, so the admin endpoints still enforce `job-runs:read`.
 - Driving **domain events outside an HTTP pipeline**, and verifying behavior through **observability** (traces, metrics, structured logs) plus a counter invariant rather than a `.http` script.
@@ -34,9 +34,11 @@ You already met `Result<T>`, value objects, Clean Architecture, CQRS, and testin
 |---|---|---|
 | **Scheduled `BackgroundService`** | A hosted service whose tick interval comes from config (`Reminders:TickIntervalMinutes`); each tick is one `JobRun`. | There's no request to scope work to — the tick *is* the unit of work, and it must be observable and idempotent on its own. |
 | **`TimeProvider` everywhere** | All "is this due?" and "how old is this?" logic reads injected time. | A scheduler that reads `DateTimeOffset.UtcNow` is untestable; with `TimeProvider` you fast-forward a `FakeTimeProvider` and assert exact tick outcomes. |
-| **Idempotency by unique constraint** | A DB unique index on `(SubscriptionId, Tier, Channel)`; the dispatcher **inserts then catches** the violation. | A retried or concurrent tick must not send a second reminder. Read-then-decide races; the constraint is the source of truth. |
-| **Gateway error classification** | Map a gateway result to `SoftFailed` (transient, e.g. 5xx → retry next tick) or `HardFailed` (permanent, e.g. missing phone → never retry). | Lets the worker make progress on transient faults without hammering on permanent ones — and it should classify off Trellis `Error` types, not a hand-rolled `Transient`/`Permanent` enum. |
-| **Actor composition (no leak)** | One `IActorProvider` that yields a `SystemActor` for the worker but a real/HTTP actor for requests. | The classic footgun: registering the worker's `SystemActor` globally so the admin endpoints stop checking permissions. The auth-composition smoke check ([6c](#6c-prove-the-actor-doesnt-leak-into-http)) proves it didn't. |
+| **Idempotency by unique constraint** | An ACL claim adapter calls `TryInsertUniqueAsync` on a clean context; `FaultCodes.DuplicateKey` becomes `Skipped(Duplicate)`. | The database arbitrates races. Never run the helper on a tracker containing pending `JobRun` changes. |
+| **Gateway error classification** | Use `error.Classify()` and `RetryClassification`, preserving the lab's state/retry rules. | Network failures map to `Unavailable` at the gateway boundary. Opaque `TransportFault` is Permanent by default, not automatically retryable. |
+| **Actor composition (no leak)** | Register the HTTP provider, then wrap it with `UseWorkerActor(systemActor)` or `AddTrellisWorkerActor`. | The shipped wrapper supplies the system actor only when there is no HttpContext; it does not authenticate anonymous HTTP requests. |
+| **Durable failure state** | `Result.FailAfterCommit<T>(error)` at the leaf failure boundary; preserve that intent at the outer tick boundary. | Ordinary failures do not commit. Nested unit-of-work commits defer, and failed-result domain-event dispatch does not run. |
+| **Worker harness** | `Trellis.Testing.Worker` supplies `WorkerHarness<TWorker>`, fake time and event/named-tick barriers. | No hand-written host lifecycle or sleeps. Register production Mediator/event wiring yourself; the harness registers the worker. |
 | **Counter invariant** | Every completed tick satisfies `dispatched + softFailed + hardFailed + skippedDuplicate + skippedInactive + skippedBudget == due`. | A single, cheap check that the dispatch loop accounted for every due subscription exactly once. |
 | **Observability-as-verification** | No `.http` script — you read Aspire traces/metrics/logs and the two admin endpoints. | For an autonomous service, telemetry *is* the interface; building it well is part of the job, not an afterthought. |
 
@@ -71,9 +73,10 @@ Identical to [OM Step 2](training-lab.md#step-2-start-the-aspire-dashboard) — 
 ## Step 3 — Scaffold (and expect to reshape it)
 
 ```bash
-dotnet new install Trellis.AspTemplate        # first time only
-dotnet new trellis-asp -n SubscriptionReminder --authorName "Your Name"
-dotnet build && dotnet test                    # sample tests pass
+dotnet new install Trellis.Asp.Templates@1.0.151-alpha
+dotnet new trellis-asp -n SubscriptionReminder --author-name "Your Name" --api-versioning true
+dotnet build && dotnet test --solution SubscriptionReminder.slnx
+dotnet agentdocs check --strict
 git add -A && git commit -m "Scaffold with Trellis template"
 ```
 
@@ -83,9 +86,9 @@ git add -A && git commit -m "Scaffold with Trellis template"
 
 Open Copilot Chat and **attach two files** (paperclip — don't paste): [`specs/subscription-reminder-worker.md`](../specs/subscription-reminder-worker.md) as `SPEC.md` and [`specs/coverage-checklist-subscription-reminder.md`](../specs/coverage-checklist-subscription-reminder.md) as `COVERAGE.md`. Then send:
 
-> Implement the Subscription Renewal Reminder Worker according to the attached SPEC.md. Replace the sample Todo code — the spec is intentionally non-CRUD, so most of the template's HTTP sample should be deleted. Follow `.github/copilot-instructions.md` and `.github/trellis-api-*.md` exactly. Every row in §1–§10 of COVERAGE.md must have a matching test.
+> Implement the Subscription Renewal Reminder Worker according to SPEC.md and COVERAGE.md. Start at AGENTS.md, then the required AgentDocs router and selected recipe bodies. Replace the Todo sample. Use shipped UseWorkerActor, Error.Classify(), TryInsertUniqueAsync/FaultCodes, FailAfterCommit and WorkerHarness rather than custom equivalents. Keep claim acquisition separate from dirty tick state, preserve durable fail-fast outcomes, and test real HTTP/worker identity composition. Every row in §1–§10 of COVERAGE.md needs a matching assertion.
 
-Let it work; then `dotnet build && dotnet test`, pasting back any errors until clean.
+Let it work; then `dotnet build && dotnet test --solution SubscriptionReminder.slnx`, pasting back errors until clean. After package changes, run `dotnet restore` and `dotnet agentdocs sync` from the generated Git root.
 
 ## Step 5 — Configure a fast tick and a deterministic seed
 
@@ -142,7 +145,7 @@ Hit the admin endpoint twice — this is the check that the worker's `SystemActo
 | Request | `X-Test-Actor` | Expected |
 |---|---|---|
 | A | `{"Id":"admin","Permissions":["job-runs:read"]}` | `200` |
-| B | `{"Id":"noone","Permissions":["unrelated:perm"]}` | **`403`** (or `401`) — not `200` |
+| B | `{"Id":"noone","Permissions":["unrelated:perm"]}` | **`403`** — the identity exists but lacks permission |
 
 If B returns `200`, the actor provider is granting `SystemActor` (which has `job-runs:read`) to HTTP requests — a §10 violation.
 
@@ -161,13 +164,13 @@ Read the generated code against [What "good" looks like](#what-good-looks-like-a
 
 Your definition of done. (As an eval these become scored rows; the binding matrix is the [coverage checklist](../specs/coverage-checklist-subscription-reminder.md).)
 
-- **The tick is idempotent.** One attempt row per `(SubscriptionId, Tier, Channel)`, enforced by a DB unique constraint the dispatcher **inserts-then-catches**. *Why:* retries and overlapping ticks must never double-send.
+- **The tick claims idempotently.** One attempt row per triple; an ACL adapter uses `TryInsertUniqueAsync` on a clean context and translates only duplicate-key conflicts into skips. This guards ordinary retries/races, not exactly-once external delivery across process crashes.
 - **Time is injected.** No `DateTimeOffset.UtcNow` in production code — due-window and age logic read `TimeProvider`. *Why:* the whole service is time-driven and must be deterministically testable.
-- **Failures are classified, not invented.** Transient gateway faults → `SoftFailed` (retried); permanent/data faults → `HardFailed` (not retried) — derived from Trellis `Error` types, not a parallel enum. *Why:* progress on transient faults, no thrashing on permanent ones.
-- **The actor doesn't leak.** A single `IActorProvider` gives the worker a `SystemActor` while HTTP requests still resolve their own actor; `/admin/job-runs/{id}` enforces `job-runs:read`. *Why:* the dual-registration footgun silently disables admin authorization.
+- **Failures use `error.Classify()`.** Unavailable/RateLimited/Unexpected are Transient; AuthenticationRequired is FailFast; opaque TransportFault is Permanent. Normalize genuinely transient network faults in the gateway adapter.
+- **The actor doesn't leak.** `UseWorkerActor` wraps one compatible HTTP provider; test HTTP anonymous → 401 and authenticated-without-permission → 403 separately from the harness's system actor.
 - **Counters reconcile.** `dispatched + softFailed + hardFailed + skipped* == due` on every completed tick, and each tick emits exactly one structured "tick completed" log with `JobRunId` + counts + `durationMs`. *Why:* an autonomous service is only as trustworthy as its telemetry.
-- **Domain events flow through the pipeline**, not direct `DbContext` saves that bypass `DomainEventDispatchBehavior`.
-- **Tests** cover the dispatch outcomes (dispatched/soft/hard/skipped), the idempotency constraint against real SQLite, gateway-error classification, the counter invariant, and the actor-composition rule — built on a host + `FakeTimeProvider` + SQLite fixture (there's no `WebApplicationFactory` for a worker).
+- **Commit boundaries are explicit.** Nested Mediator sends share the outer commit; ordinary failure must not erase attempts or the failed JobRun. Use terminal `FailAfterCommit` deliberately, and an outbox/follow-up for events that must survive failed-result suppression.
+- **Tests** use `WorkerHarness` with real SQLite, fake gateways, production pipeline registrations and deterministic readiness/completion barriers. The harness owns the hosted-worker registration; HTTP composition still requires separate `WebApplicationFactory` tests.
 
 ---
 
@@ -191,11 +194,11 @@ Same methodology as the [OM lab](training-lab.md#running-this-as-a-consistency-e
 
 | If runs diverge on… | …it tells us |
 |---|---|
-| One `IActorProvider` with HttpContext branching vs. the dual-registration leak | how urgently the framework needs a worker-actor-composition helper ([#529](https://github.com/xavierjohn/Trellis/issues/529)) |
-| Classifying off Trellis `Error` types vs. a parallel `Transient`/`Permanent` enum | whether the `Error` taxonomy needs clearer transient/permanent guidance ([#530](https://github.com/xavierjohn/Trellis/issues/530)) |
-| Hand-rolled `IHost`+`FakeTimeProvider`+SQLite fixture vs. a framework helper (none exists yet) | demand for a `BackgroundService` test harness ([#531](https://github.com/xavierjohn/Trellis/issues/531)) |
-| Insert-then-catch on the unique constraint vs. read-then-decide | whether idempotency-by-constraint needs a documented recipe ([#532](https://github.com/xavierjohn/Trellis/issues/532)) |
-| Saving via `DbContext` directly vs. through the domain-event pipeline | whether `DomainEventDispatchBehavior` needs better discoverability outside HTTP |
+| `UseWorkerActor` vs. a competing global system provider | Whether shipped composition guidance was followed |
+| `Error.Classify()` vs. a copied classifier | Whether transport normalization and retry caps are understood |
+| `WorkerHarness` barriers vs. sleeps or duplicate worker registration | Whether lifecycle tests exercise the shipped harness correctly |
+| `TryInsertUniqueAsync` vs. provider-specific catches | Whether clean-context claim acquisition and duplicate cleanup are understood |
+| Terminal `FailAfterCommit` vs. ordinary failed results | Whether the durable failure and nested commit boundaries are understood |
 
 Aggregated friction across runs (from each run's `TRELLIS_FEEDBACK.md`) becomes the prioritized framework backlog.
 

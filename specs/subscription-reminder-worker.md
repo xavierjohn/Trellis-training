@@ -1,6 +1,6 @@
-# Subscription Renewal Reminder Worker — Specification
+﻿# Subscription Renewal Reminder Worker — Specification
 
-> This specification describes a background-worker service that scans for subscriptions approaching renewal and dispatches reminder notifications across multiple channels. It is intended to be given to an AI along with the Trellis Copilot Instructions to generate a working .NET application. The spec focuses on business requirements and outcomes. Implementation patterns come from the Copilot Instructions.
+> This specification describes a background-worker service that dispatches subscription renewal reminders. Use template 1.0.151-alpha / Trellis alpha.557 and start at AGENTS.md, the required AgentDocs router and selected recipe bodies. Preserve the business rules below while adopting shipped worker, persistence, authorization and testing helpers.
 >
 > **This lab is deliberately non-CRUD.** The service is dominated by a scheduled `BackgroundService` rather than HTTP request handlers. Only a thin HTTP surface (health probe + one read-only admin endpoint) exists. The spec exists to stress Trellis primitives — `Result<T>`, `IActorProvider`, `Maybe<T>`, `Specification<T>`, CQRS — in a context where there is no incoming HTTP request, no response writer, and no per-request scope managed by ASP.NET. Implementations should compose framework primitives without inventing per-feature adapters where a generic abstraction already exists.
 
@@ -98,15 +98,15 @@ The worker runs unattended. There is no human user behind any operation. Authori
 - `SkippedDuplicateCount` — non-negative integer (composite-key collision on insert)
 - `SkippedInactiveCount` — non-negative integer (subscription became inactive or vanished between query and dispatch)
 - `SkippedBudgetCount` — non-negative integer (items returned by the due query that the tick did not attempt because the wall-clock budget was exhausted or the worker was cancelled)
-- `FailureSummary` — `Maybe<string>` (1–500 chars; set when `Outcome = Failed`)
+- `FailureSummary` — `Maybe<string>` (1–500 chars; set by `FailFast`; counter-derived failure can leave it absent)
 
 **Counter invariant.** `DispatchedCount + SoftFailedCount + HardFailedCount + SkippedDuplicateCount + SkippedInactiveCount + SkippedBudgetCount = DueCount` on every completed tick (normal, budget-exhausted, cancelled, and fail-fast). Fail-fast and cancellation contribute remaining unattempted items to `SkippedBudgetCount` so the invariant always holds.
 
 **Rules:**
 - `Outcome` defaults to `Running`; finalised on completion.
+- `Outcome = Failed` iff `FailureSummary` is set (fail-fast condition reached) **or** `DispatchedCount == 0 && (HardFailedCount + SoftFailedCount) > 0` (all attempted items failed), even when budget/cancellation skips remain.
 - `Outcome = Succeeded` iff `SoftFailedCount = 0 && HardFailedCount = 0 && SkippedBudgetCount = 0 && FailureSummary = None`. `SkippedDuplicate` and `SkippedInactive` do not block `Succeeded` — they are no-ops, not failures. `SkippedBudget > 0` does block `Succeeded` because the tick demonstrably did not finish its work.
-- `Outcome = PartiallyFailed` iff `FailureSummary = None && DispatchedCount > 0 && (SoftFailedCount > 0 || HardFailedCount > 0 || SkippedBudgetCount > 0)`.
-- `Outcome = Failed` iff `FailureSummary` is set (fail-fast condition reached) **or** `DispatchedCount == 0 && (HardFailedCount + SoftFailedCount) > 0` (all attempted items failed).
+- `Outcome = PartiallyFailed` iff `FailureSummary = None && (DispatchedCount > 0 || (SoftFailedCount + HardFailedCount) == 0) && (SoftFailedCount + HardFailedCount + SkippedBudgetCount) > 0`. Thus an entirely unattempted batch is partially failed, but a failed attempted prefix with zero dispatches remains failed.
 
 **Operations:**
 - `IncrementDispatched()`, `IncrementSoftFailed()`, `IncrementHardFailed()`, `IncrementSkippedDuplicate()`, `IncrementSkippedInactive()`, `IncrementSkippedBudget(count)` (the budget bump is by the remaining unattempted count, not always one)
@@ -163,18 +163,18 @@ The worker is implemented as a single `BackgroundService` (or equivalent `IHoste
 
 **Tick lifecycle:**
 
-1. Create a new `JobRun` with `Outcome = Running`. Persist.
-2. Open a fresh DI scope for the tick. Resolve handlers from the scope.
-3. Resolve the `SystemActor` from `IActorProvider`.
+1. Open a fresh DI scope for the tick; resolve Mediator and create/stage `JobRun`.
+2. Keep persistence boundaries explicit (§6.1); unique attempt claims use a separate clean ACL context.
+3. The standard authorization pipeline resolves the worker actor. Actor-aware handlers receive that checked actor; do not resolve it again in their business body.
 4. Query due reminders (§6.3). The query returns at most `MaxBatchSize` items.
-5. For each due item, dispatch in sequence (see §6.2). Update `JobRun` counters in-place after each item. Honour the wall-clock budget — if exceeded mid-batch, stop dispatching, call `IncrementSkippedBudget(remainingCount)` so the counter invariant holds, then finalise via `Complete(...)` (which derives `Outcome = PartiallyFailed`).
-6. On fail-fast (§6.4), call `IncrementSkippedBudget(remainingCount)` for unattempted items (the offending item has already been persisted as `SoftFailed` by §6.2 step 5 and counted as `SoftFailedCount`), then call `JobRun.FailFast(...)` and halt.
+5. For each due item, dispatch in sequence (see §6.2). Update `JobRun` counters in-place after each item. Honour the wall-clock budget — if exceeded mid-batch, stop dispatching, call `IncrementSkippedBudget(remainingCount)` so the counter invariant holds, then finalise via `Complete(...)` using §3.3's mutually exclusive outcome rules.
+6. On fail-fast, count the offending attempt's resulting SoftFailed/HardFailed state, add unattempted items to SkippedBudget, call JobRun.FailFast and preserve terminal persist-on-failure intent.
 7. On normal completion, call `JobRun.Complete(...)`. Persist.
 8. Emit one structured log entry summarising the tick (see §9). Emit metric updates.
 
 **Time source:** the worker must obtain "now" from an injected `TimeProvider` (the .NET 8 abstraction, available via `IServiceCollection.AddSingleton(TimeProvider.System)`). Direct calls to `DateTimeOffset.UtcNow` are not permitted because they cannot be controlled in tests.
 
-**Cancellation:** the `BackgroundService.StopAsync` cancellation token must be observed by the dispatch loop. A tick already in progress should attempt to finalise its `JobRun` on cancellation: call `IncrementSkippedBudget(remainingCount)` for any items the dispatch loop didn't reach, then `Complete(...)` (which derives `PartiallyFailed`). Aborting mid-update without finalising is not allowed.
+**Cancellation:** observe the worker stop token in work/gateway calls. Finalize counters and attempt state with a separate bounded cleanup token, not the already-cancelled work token; derive Outcome via `Complete`. A cancelled outer dispatch cannot rely on `TransactionalCommandBehavior` to save itself. Provide an explicit finalization boundary and prove durable prior outcomes in SQLite; do not leave a partially processed attempt Pending or silently claim cleanup succeeded when saving failed.
 
 ## 6. Operations (Use Cases)
 
@@ -187,7 +187,9 @@ All operations are implemented as Commands or Queries using CQRS. The worker is 
 - **Input:** `tickStartedAt` (UTC timestamp captured from `TimeProvider`).
 - **Behaviour:** orchestrates §5. Creates `JobRun`, queries due reminders, dispatches each (via `DispatchReminderCommand`), persists final `JobRun`.
 - **Success:** `Result.Ok(JobRunId)`.
-- **Failure:** fail-fast conditions (§6.4) produce a `Result.Fail` whose `Error` is the original `Error.AuthenticationRequired` (or similar) returned by the failing gateway call. Even on failure, the `JobRun` is persisted with `Outcome = Failed` and a populated `FailureSummary`.
+- **Failure:** fail-fast returns the original gateway Error via terminal `Result.FailAfterCommit<JobRunId>(error)` after staging the failed JobRun and attempt state. Ordinary `Result.Fail` would roll back required state.
+
+**Commit ownership matters.** Nested Mediator commands on the same scoped unit of work defer their commits to the outer tick. Preserve persist-on-failure intent at both leaf and outer boundaries; an inner marker alone does not make the outer tick commit. Do not fold such results through `Combine`/`TraverseAll`. A failed commit replaces the original error and must be surfaced. Prior successful dispatches and final counters must survive fail-fast; cancellation needs the explicit cleanup boundary above. Unique claims are separately durable, so this is not an exactly-once guarantee for an external send across process crashes.
 
 ### 6.2 Dispatch Reminder (Command)
 
@@ -198,15 +200,15 @@ All operations are implemented as Commands or Queries using CQRS. The worker is 
   1. **Load subscription.** If not found or `IsActive = false`, return `Result.Ok(DispatchOutcome.Skipped(SkipReason.NoLongerEligible))` — not an error.
   2. **Acquire the attempt.**
      - If `ExistingAttemptId` is `Some(id)` → load by id. If status is not `SoftFailed`, treat as a race (another tick processed it) and return `Result.Ok(DispatchOutcome.Skipped(SkipReason.Duplicate))`. Otherwise call `ResetForRetry(now)` to flip status to `Pending`.
-     - If `ExistingAttemptId` is `None` → instantiate a new `DispatchAttempt` in `Pending` state. Insert. If the insert raises a unique-constraint violation on `(SubscriptionId, Tier, Channel)`, return `Result.Ok(DispatchOutcome.Skipped(SkipReason.Duplicate))` — a concurrent tick won the race; this is not an error.
+     - If `ExistingAttemptId` is `None` → acquire a Pending attempt using an ACL adapter and `TryInsertUniqueAsync` in a clean context. Match only `Error.Conflict.Code == FaultCodes.DuplicateKey` to return `Skipped(Duplicate)`; a competing insert won the race.
   3. **Check data preconditions.** If `Channel = Sms` and `SubscriberPhone = None`, call `RecordHardFailure(reason: "no phone on file", completedAt: now)` on the attempt acquired in step 2, persist, and return `Result.Ok(DispatchOutcome.HardFailed(DataError))`. Do **not** call the gateway.
   4. **Call the gateway** (`IEmailGateway` or `ISmsGateway`).
   5. **Translate the gateway `Result<ProviderMessageId>`** into the attempt state via the state machine (§4) and the error classification (§7). Persist.
-     - **Fail-fast classifications** (e.g., `Error.AuthenticationRequired`): the attempt acquired in step 2 must **not** be left as `Pending`, which would permanently suppress future reminders for this triple (the due-query only retries `SoftFailed`). Treat the attempt as a soft failure — call `RecordSoftFailure(reason: "{provider} authentication failed", attemptedAt: now)` so the row becomes `SoftFailed` and is eligible for retry on the next tick (after the operator rotates the API key). Persist. Then return `Result.Fail(<the original gateway Error>)` so the orchestrator can short-circuit the remainder of the tick per §6.4.
+     - **FailFast** (e.g., AuthenticationRequired): record the authentication failure on the acquired attempt, never leave it Pending. `RecordSoftFailure` leaves it SoftFailed below the cap, or HardFailed at the fifth attempt per §4. Return terminal `Result.FailAfterCommit<DispatchOutcome>(originalError)` and preserve that intent at the tick boundary.
 - **Success:** `Result.Ok(DispatchOutcome)` where `DispatchOutcome` is one of `Dispatched(messageId) | SoftFailed | HardFailed(category: PermanentGatewayError | RetriesExhausted | DataError) | Skipped(reason)`.
-- **Failure:** only fail-fast conditions (§6.4) produce `Result.Fail`. Per-item soft/hard failures are reported as part of a successful `Result.Ok` so the orchestrator can continue. On fail-fast, the attempt row has already been recorded as `SoftFailed` in step 5 — no row is ever left in `Pending` after the handler returns.
+- **Failure:** only FailFast produces a failed Result (with persist-on-failure intent). Per-item soft/hard outcomes are successful Result payloads so iteration continues. Attempt state is staged, not necessarily committed until the owning tick returns; no processed row remains Pending afterward.
 
-Storage-layer idempotency is enforced exclusively through step 2: a new attempt is `INSERT`-then-catch, never `SELECT`-then-decide (which would race across overlapping ticks). Retries explicitly load-by-id because the caller (§6.3) already disambiguated.
+`TryInsertUniqueAsync` immediately saves a single claim and requires a clean tracker. Never call it with a pending JobRun or unrelated attempt mutations; use a factory-created ACL context. Duplicate cleanup is shipped behavior; FK/concurrency/infrastructure/cancellation failures propagate, not duplicate skips. Retries load by the supplied existing attempt ID.
 
 ### 6.3 Query Due Reminders (Query)
 
@@ -228,7 +230,7 @@ The orchestrator (`RunJobTickCommand`) halts the tick and marks `JobRun.Outcome 
 - Any gateway call returns `Result.Fail(Error.AuthenticationRequired)` (e.g., API key revoked). Continuing would generate cascading failures and waste retry budget.
 - Database `SaveChangesAsync` raises an `OperationCanceledException` not originating from the worker's own stop token.
 
-Per-item transient and permanent gateway failures **do not** fail-fast. They roll up into `JobRun` counters and produce `PartiallyFailed` (or `Succeeded` if zero failures and zero budget skips occurred).
+Per-item transient and permanent gateway failures **do not** fail-fast. Continue processing and derive the final outcome from §3.3: `Failed` if no item dispatched and any attempt failed; `PartiallyFailed` for mixed dispatch/failure or otherwise unfinished work; `Succeeded` if there are no failures or budget skips.
 
 ### 6.5 Query Job Run By Id (Query)
 
@@ -268,16 +270,16 @@ public interface ISmsGateway
 
 | Gateway condition | Trellis `Error` returned by the gateway | Orchestrator category | Mapped to dispatch status |
 |-------------------|-----------------------------------------|-----------------------|---------------------------|
-| Network timeout, 5xx | `Error.Unavailable(reasonCode, RetryAdvice?)` | **Transient** | `SoftFailed` while `RetryCount < MaxRetries - 1`; `HardFailed` with reason `"transient retries exhausted"` otherwise |
+| Network timeout, 5xx, retryable DNS/TLS/reset | `new Error.Unavailable(retryAdvice) { Code = "gateway.unavailable" }` | **Transient** | `SoftFailed` below the five-attempt cap; `HardFailed` on exhaustion |
 | Throttling (429 with `Retry-After`) | `Error.RateLimited(RetryAdvice)` | **Transient** | Same as above. The orchestrator may honour `RetryAdvice.After` to delay the next tick's attempt, but a fixed-interval scheduler that simply lets the next tick retry is also acceptable. |
 | Unexpected gateway exception / malformed response | `Error.Unexpected(reasonCode, faultId?)` | **Transient** | Same as `Unavailable`. |
-| Invalid address (e.g., gateway rejects email format) | `Error.InvalidInput(field, ...)` | **Permanent** | `HardFailed` (terminal). |
+| Invalid address | `Error.InvalidInput.ForField("gateway.address.invalid", "recipient", detail: "...")` | **Permanent** | `HardFailed` |
 | Content rejected, recipient blocked, business-rule violation in gateway | `Error.InvariantViolation(reasonCode, resource?)` | **Permanent** | `HardFailed` (terminal). |
 | Authentication failure (API key revoked, signature rejected) | `Error.AuthenticationRequired(scheme?)` | **Fail-fast** | Halts tick; `JobRun.Outcome = Failed`. |
-| Recipient explicitly blocked by gateway authorisation policy | `Error.Forbidden(policyId, resource?)` | **Permanent** | `HardFailed` (terminal). Distinct from `AuthenticationRequired`: the gateway's credentials are valid but it refuses this particular recipient. |
-| Transport-layer fault (DNS, TLS, connection reset) | `Error.TransportFault(fault)` | **Transient** | Same as `Unavailable`. |
+| Recipient blocked by policy | `Error.Forbidden(code, resource?)` | **Permanent** | `HardFailed`; credentials are valid but recipient is refused |
+| Opaque transport fault | `Error.TransportFault(fault)` | **Permanent** | `HardFailed`; normalize genuinely retryable network failures to Unavailable at the gateway boundary |
 
-The classification logic (which `Error` types map to which category) belongs in a single helper method co-located with `DispatchReminderCommand` — not scattered across handlers. The mapping is the lab's central test of whether the LLM **discovers** the existing Trellis taxonomy and `RetryAdvice` shape, or hand-rolls a parallel enum hierarchy. Hand-rolled parallel enums are a scoring deduction in the architecture rubric.
+Call the shipped `error.Classify()` and switch on `RetryClassification`; do not copy the closed Error taxonomy into a local classifier/enum. Honor retry caps and optional advice in domain orchestration. Catch unexpected gateway exceptions at the adapter boundary and map to safe `Error.Unexpected`; do not swallow cancellation or expose exception messages as public detail.
 
 ## 8. HTTP Surface
 
@@ -322,9 +324,9 @@ If no tick has run yet, return `200 OK` with `{"status": "healthy", "lastTickAt"
 }
 ```
 
-Errors on `/admin/job-runs/{id}`: `404` if not found, `403` if missing permission, `400` if `api-version` missing. Use `AddTrellisProblemDetails` + `UseTrellisProblemDetails` for the response wrapping. ETag round-trip on this endpoint is **not** required (job runs are immutable; clients can cache forever).
+Admin errors: 401 absent identity, 403 missing permission, 404 absent run, 400 missing version, 422 invalid typed input. Use `UseAsp()` / Result response mapping plus `UseProblemDetails()` and standard exception/status-code middleware; ProblemDetails enrichment does not own Result-to-HTTP mapping. ETag is not required.
 
-The `/admin` endpoint is the one place this service touches existing Trellis HTTP helpers (`WithVersionedRoute`, `ProblemDetails`, permission checks against `IActorProvider`). Its purpose is to verify those helpers still compose cleanly when the *rest* of the application is non-HTTP.
+The admin GET uses the versioned HTTP profile; no Location header or version-aware Location chain is needed for a read. Keep its explicit query-string version reader and test identity separately from worker dispatch.
 
 ## 9. Result Reporting & Observability
 
@@ -372,16 +374,14 @@ The `JobRun` aggregate (§3.3) is the durable forensic record. Logs may be dropp
 There is no human user behind a worker tick. There is a human user behind a request to `/admin/job-runs/{id}`. Both paths run in the same process and share a single DI container. The same `IActorProvider` registration must serve both.
 
 **SystemActor:**
-- `ActorId = "system"`
-- `IsAuthenticated = true`
-- `Permissions = ["reminders:dispatch", "reminders:read", "job-runs:read"]`
+- Construct `Actor.Create("system", new HashSet<string>(["reminders:dispatch", "reminders:read", "job-runs:read"]))`. Actor has no IsAuthenticated member.
 
-**Composition pattern.** A single `IActorProvider` registration (`scoped`, per the interface's documented lifetime). The implementation distinguishes by context:
+**Composition pattern.** Register one compatible HTTP actor provider, then select `UseWorkerActor(systemActor)` (or direct `AddTrellisWorkerActor`). The shipped decorator distinguishes by context:
 
 - **HTTP-request scope:** `IHttpContextAccessor.HttpContext` is non-null. Derive the actor from `HttpContext.User` per the standard Trellis HTTP pattern. If the request has no usable authenticated identity, return `Maybe<Actor>.None` — the mediator pipeline will map this to `Error.AuthenticationRequired` / HTTP 401.
 - **Worker tick scope:** `IHttpContextAccessor.HttpContext` is null (the worker opens its own DI scope on each tick; no HTTP request exists). Return `Maybe.From(SystemActor)`.
 
-This is one registration, not two. The HTTP and worker paths differ by *runtime context*, not by *DI registration*. Implementations that register two competing `IActorProvider`s (e.g., one in `AddTrellisAsp()` and a second `services.AddScoped<IActorProvider, SystemActorProvider>()` after it) will silently overwrite the HTTP path and grant `SystemActor`'s permissions to anonymous HTTP requests — that is a scoring deduction.
+Do not write a context-branching provider or register a competing global system provider. The wrapper requires exactly one compatible unkeyed inner provider and delegates HTTP identity/absence unchanged; keyed providers are not competing defaults.
 
 **Endpoint authorisation:**
 - `/health` — anonymous.
@@ -404,7 +404,7 @@ This is one registration, not two. The HTTP and worker paths differ by *runtime 
 - **`Maybe<T>` columns** (`SubscriberPhone`, `CompletedAt`, `ProviderMessageId`, `FailureReason`, `FailureSummary`) stored as nullable columns, round-tripping to `Maybe.None` when null.
 - **Database creation:** Use `EnsureCreated()` on startup in development mode. Do NOT use EF Core migrations.
 
-**Idempotency mechanism.** For *new* attempts (§6.2 step 2, `ExistingAttemptId = None`), the handler attempts the insert and catches the unique-constraint violation on `(SubscriptionId, Tier, Channel)` as the dedup signal. It does **not** read-then-decide before inserting (that race-conditions across overlapping ticks). For *retries* (§6.2 step 2, `ExistingAttemptId = Some(id)`), the handler loads the attempt by id — the disambiguation has already been done by §6.3.
+**Idempotency mechanism.** The ACL adapter acquires new attempts with clean-context `TryInsertUniqueAsync`; only `FaultCodes.DuplicateKey` means DuplicateSkip. Load explicit retries by ID. Keep claims separate from staged tick changes and use `FailAfterCommit` for durable failed outcomes (§6.1); no custom provider-exception classifier.
 
 ## 12. Error Behavior
 
@@ -419,8 +419,8 @@ This section enumerates worker-layer failure categories. Because the worker has 
 | Subscription has `Channel = Sms` but `SubscriberPhone = None` | DataError | Persist `DispatchAttempt` as `HardFailed` with reason `"no phone on file"`; increments `JobRun.HardFailedCount`. Gateway is **not** called. |
 | Subscription `IsActive = false` (or missing) between query and dispatch | NoLongerEligible | No `DispatchAttempt` created or mutated; increments `JobRun.SkippedInactiveCount`. Log at Information. |
 | Composite unique violation on `DispatchAttempt` insert | DuplicateSkip | Increments `JobRun.SkippedDuplicateCount`. No error. |
-| Tick wall-clock budget exceeded mid-batch | TimeBudget | Stop dispatching. Increment `SkippedBudgetCount` by the number of unattempted due items so the counter invariant holds. Mark `JobRun.Outcome = PartiallyFailed`. |
-| Worker stop token signalled | Cancellation | Stop dispatching. Increment `SkippedBudgetCount` by the number of unattempted due items. Finalise `JobRun` with current counters. Mark `Outcome = PartiallyFailed`. |
+| Tick wall-clock budget exceeded mid-batch | TimeBudget | Stop dispatching. Increment `SkippedBudgetCount` by the unattempted count; finalise via `Complete` using §3.3. Remaining work gives `PartiallyFailed` unless the attempted prefix had failures and zero dispatches, which gives `Failed`. |
+| Worker stop token signalled | Cancellation | Stop dispatching. Count unattempted items in `SkippedBudgetCount` and finalise with the bounded cleanup boundary. Derive the outcome via §3.3; cancellation does not override an all-failed attempted prefix or turn an already completed successful batch into a failure. |
 
 For the admin HTTP endpoint, standard mappings apply: 401 unauthenticated, 403 missing permission, 404 not found, 422 validation, 400 framework-level. These follow the same conventions as the OM spec.
 
@@ -443,7 +443,7 @@ Handler tests with fake gateways and fake repositories.
 
 - `RunJobTickCommand`: orchestrates correctly with mixed-outcome batch (some dispatched, some soft-failed, some hard-failed, some skipped); honours wall-clock budget; halts on fail-fast.
 - `DispatchReminderCommand`: each branch (success, transient → SoftFailed, transient at retry cap → HardFailed, permanent → HardFailed, authentication-required → fail-fast, duplicate-insert, no-longer-eligible subscription, SMS preference with no phone, retry path with `ExistingAttemptId = Some(...)`).
-- Error classification helper: each Trellis `Error` type listed in §7 maps to the documented category. Hand-rolled parallel Transient/Permanent enums are not acceptable — the helper must operate over the framework's `Error` types directly.
+- Drive every §7 gateway outcome through shipped `Classify()` and verify resulting state/counters; test normalized transient network errors separately from Permanent opaque TransportFault.
 - `QueryDueRemindersQuery`: returns only items within the reminder window; respects `maxBatchSize`; excludes inactive subscriptions; excludes triples with `Dispatched` or `HardFailed` attempts; populates `ExistingAttemptId` correctly for `SoftFailed` triples.
 - Authorisation: every command/query succeeds with `SystemActor` (or `job-runs:read` actor for §6.5); fails with an actor lacking the required permission.
 - Time control: handlers must use the injected `TimeProvider` — tests fix `now` via `FakeTimeProvider` (`Microsoft.Extensions.Time.Testing`).
@@ -452,30 +452,31 @@ Handler tests with fake gateways and fake repositories.
 
 These tests **must exercise the worker without `WebApplicationFactory`**, because the unit under test is `BackgroundService.ExecuteAsync` (or the orchestrator it delegates to), not an HTTP pipeline. Two patterns are acceptable:
 
-1. **Full hosted-service test.** Build an `IHost` via `HostBuilder` (or `Host.CreateApplicationBuilder`), register the worker plus fakes, `StartAsync`, advance the `FakeTimeProvider`, observe via the worker's `JobRunCompleted` signal (an `IDomainEventHandler<JobRunCompletedDomainEvent>` test fake, an awaitable `TaskCompletionSource`, or polling the `JobRun` projection), then `StopAsync`. Avoid `Task.Delay` as the completion signal — it produces flaky tests.
-2. **Direct orchestrator test.** Resolve `RunJobTickCommand` from a `ServiceProvider` and `await` it synchronously. Simpler and faster; use for most scenarios. Use pattern 1 only when the assertion specifically targets `BackgroundService` lifecycle (start / stop / cancellation).
+1. **Full hosted-service test.** Use `WorkerHarness<TWorker>.CreateAsync` from `Trellis.Testing.Worker`, with production Mediator/event registrations, SQLite and fake gateways. The harness registers the worker; do not double-register it. Set its SystemActor permissions explicitly.
+2. **Direct dispatch test.** Resolve `IMediator` from a test scope and send `RunJobTickCommand` through the registered production pipeline, awaiting completion. Simpler and faster; use for most orchestration scenarios. Use pattern 1 when the assertion specifically targets `BackgroundService` lifecycle (start / stop / cancellation).
 
 Either pattern must:
 - Register `TimeProvider` (not `DateTimeOffset.UtcNow`) — use `FakeTimeProvider` from `Microsoft.Extensions.Time.Testing`.
 - Register fake `IEmailGateway` and `ISmsGateway` with deterministic outcome injection per `(SubscriptionId, Tier)`.
 - Use a real SQLite database (file or shared in-memory connection) — not in-memory EF Core provider — so unique-constraint behaviour is exercised.
-- Register the same `IActorProvider` implementation the production host uses, so §10's composition contract is exercised.
+- The harness supplies TestActorProvider; do not mistake it for proof of §10. Separate real HTTP-host tests exercise UseWorkerActor and both authenticated and anonymous requests.
+- Register the first TimeProvider delay before signaling ready. Await readiness, advance `harness.Time`, then use event/tick completion barriers. Named waits use `LastTickIndexOf(name)` as their global cursor, not `TickCountOf(name)`. No sleeps or duplicate tick execution.
 
 Scenarios to cover:
 - One tick with all-success batch → `JobRun.Outcome = Succeeded`, gateway calls recorded.
 - One tick with mixed outcomes → counter invariant holds (§3.3).
 - Transient → next tick retries → eventual `Dispatched`. Verify the same `DispatchAttempt` row is updated (not a second row inserted).
 - Transient × 5 → `HardFailed` after retry cap with reason `"transient retries exhausted"`.
-- `AuthenticationRequired` → tick halts; `JobRun.Outcome = Failed`; subsequent items not attempted (`SkippedBudgetCount` covers them so the counter invariant holds); the originally-failing item's `DispatchAttempt` is persisted as `SoftFailed` with reason `"{provider} authentication failed"` (per §6.2 step 5 — never `Pending`, which would permanently suppress the triple).
-- `AuthenticationRequired` recovery → after the failed tick above, swap the fake gateway to a healthy stub and run another tick. The same `DispatchAttempt` row (loaded via `ExistingAttemptId = Some(id)`) transitions `SoftFailed → Pending → Dispatched`; no second row is inserted.
+- AuthenticationRequired halts the tick; persist failed JobRun and the attempt as SoftFailed below cap or terminal HardFailed at cap, never Pending. Counters include the offending attempt and the unattempted remainder.
+- AuthenticationRequired recovery below the cap: restore healthy gateway, retry the same SoftFailed row via ExistingAttemptId, then Dispatched; no second row.
 - Duplicate composite-key insert (simulate by inserting an attempt out-of-band before the tick runs) → `SkippedDuplicateCount` incremented; no exception escapes.
 - SMS preference with no phone → `HardFailed` with reason `"no phone on file"`; gateway **not** called (assert fake recorded zero calls for that subscription).
 
 ### 13.3.1 Domain Event Pipeline
 
-Trellis publishes domain events via `IDomainEventPublisher` and dispatches to `IDomainEventHandler<T>` implementations registered in DI. The worker must use this same pipeline — events raised on `DispatchAttempt` during a tick must reach handlers in the worker's per-tick scope, exactly as they would in an HTTP request scope.
+Use shipped domain-event dispatch with commit ownership preserved. Successful outer ticks publish after the owning commit. `FailAfterCommit` remains a failed result, so ordinary in-process event dispatch is suppressed even after its durable save; required failure-path delivery needs an outbox or explicit post-commit follow-up. The harness does not register dispatch on the application's behalf.
 
-Register a test `IDomainEventHandler<ReminderDispatchedDomainEvent>` (and optionally one for `ReminderHardFailedDomainEvent`) that records each event. After a tick that produces N successful dispatches, the handler must observe N events. This single test rules out the failure mode where the worker bypasses the dispatch pipeline (e.g., by saving directly through the DbContext without the mediator-pipeline `DomainEventDispatchBehavior` running).
+For a successful owning tick, assert N dispatch events after N successful reminders and none before the commit. For fail-fast, separately assert saved state and required outbox/follow-up delivery; do not wait forever for an ordinary failed-result event that is intentionally suppressed.
 
 ### 13.4 HTTP Integration Tests
 
@@ -483,7 +484,7 @@ For the two HTTP endpoints, use `WebApplicationFactory` as normal.
 
 - `GET /health` → 200 with expected shape; covers never-run, succeeded, partially-failed, failed last-tick states.
 - `GET /admin/job-runs/{id}` → 200 happy path; 401 unauthenticated; 403 authenticated but missing `job-runs:read`; 404 unknown id; 400 missing api-version.
-- ProblemDetails wrapping: error responses go through `AddTrellisProblemDetails` (assert RFC 7807 shape).
+- ProblemDetails: Result mapping plus enrichment produces RFC 9457 `application/problem+json`; no `[Produces("application/json")]` override.
 - **Auth composition (per §10).** Send an unauthenticated request to `/admin/job-runs/{id}` and assert **401**, not 200. This guards against the failure mode where the worker's `IActorProvider` accidentally grants `SystemActor` to anonymous HTTP requests.
 
 ### 13.5 Observability Tests

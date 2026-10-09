@@ -1,8 +1,9 @@
-namespace OrderManagement.AntiCorruptionLayer.Eventing;
+﻿namespace OrderManagement.AntiCorruptionLayer.Eventing;
 
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using OrderManagement.Application.IntegrationEvents;
+using Trellis.Mediator;
 
 /// <summary>
 /// Development-only background service that simulates an external payments service: whenever an
@@ -14,11 +15,11 @@ internal sealed class PaymentSimulator(InMemoryEventBus bus, TimeProvider timePr
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var message in bus.SubscribeAsync(OrderSubmittedIntegrationEvent.MessageType, stoppingToken))
+        await foreach (var message in bus.SubscribeAsync(OrderSubmittedIntegrationEvent.MessageType, stoppingToken).ConfigureAwait(false))
         {
-            var evt = JsonSerializer.Deserialize<OrderSubmittedIntegrationEvent>(message, IntegrationEventSerialization.Options);
-            if (evt is null)
-                continue;
+            var submitted = JsonSerializer.Deserialize<BrokerEnvelope<OrderSubmittedIntegrationEvent>>(message, IntegrationEventSerialization.Options)
+                ?? throw new JsonException("An order submission must contain a broker envelope.");
+            var evt = submitted.Event;
 
             var confirmedAt = timeProvider.GetUtcNow();
             var paymentEvent = new PaymentConfirmedIntegrationEvent(
@@ -29,8 +30,17 @@ internal sealed class PaymentSimulator(InMemoryEventBus bus, TimeProvider timePr
                 confirmedAt,
                 evt.Currency);
 
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(paymentEvent, IntegrationEventSerialization.Options);
-            await bus.PublishAsync(PaymentConfirmedIntegrationEvent.MessageType, bytes, stoppingToken);
+            var outbound = new OutboundIntegrationMessage(paymentEvent.EventId, paymentEvent)
+            {
+                MessageSource = "payments",
+                CausationId = submitted.MessageId,
+                CorrelationId = submitted.CorrelationId,
+                TraceParent = submitted.TraceParent,
+                TraceState = submitted.TraceState,
+            };
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(
+                BrokerEnvelope<PaymentConfirmedIntegrationEvent>.From(outbound, paymentEvent), IntegrationEventSerialization.Options);
+            await bus.PublishAsync(PaymentConfirmedIntegrationEvent.MessageType, bytes, stoppingToken).ConfigureAwait(false);
         }
     }
 }

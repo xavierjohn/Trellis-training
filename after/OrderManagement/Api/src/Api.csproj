@@ -15,6 +15,7 @@
     <PackageReference Include="Asp.Versioning.OpenApi" />
     <PackageReference Include="Trellis.Asp" />
     <PackageReference Include="Trellis.Asp.ApiVersioning" />
+    <PackageReference Include="Trellis.ServiceDefaults" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />

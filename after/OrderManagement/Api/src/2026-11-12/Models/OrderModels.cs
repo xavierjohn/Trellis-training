@@ -1,4 +1,4 @@
-namespace OrderManagement.Api.v2026_11_12.Models;
+﻿namespace OrderManagement.Api.v2026_11_12.Models;
 
 using OrderManagement.Application.Orders;
 using OrderManagement.Domain;
@@ -70,7 +70,7 @@ public record CreateOrderLineRequest
 public record CreateOrderRequest
 {
     public CustomerId CustomerId { get; init; } = null!;
-    public IReadOnlyList<CreateOrderLineRequest> LineItems { get; init; } = [];
+    public IReadOnlyList<CreateOrderLineRequest>? LineItems { get; init; } = [];
 }
 
 /// <summary>Request model for adding a line item to a draft order.</summary>

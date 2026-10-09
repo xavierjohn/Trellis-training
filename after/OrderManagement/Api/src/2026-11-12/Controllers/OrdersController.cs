@@ -1,4 +1,4 @@
-namespace OrderManagement.Api.v2026_11_12.Controllers;
+﻿namespace OrderManagement.Api.v2026_11_12.Controllers;
 
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
@@ -11,36 +11,30 @@ using Trellis.Asp.Idempotency;
 
 /// <summary>Orders controller (spec §6.4–§6.12, §6.14, §7).</summary>
 [ApiController]
-[Produces("application/json")]
 [Route("api/[controller]")]
-public class OrdersController : ControllerBase
+public class OrdersController(ISender sender) : ControllerBase
 {
-    private readonly ISender _sender;
-
-    public OrdersController(ISender sender) => _sender = sender;
-
     /// <summary>Create a draft order. <c>POST /api/orders</c>.</summary>
     [HttpPost]
     [Consumes("application/json")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<OrderResponse>> Create(
         [FromBody] CreateOrderRequest request,
         CancellationToken cancellationToken) =>
-        _sender.Send(
+        Result.EnsureNotNull(request.LineItems, "lineItems", "Line items are required.")
+            .BindAsync(lineItems => sender.Send(
                 new CreateDraftOrderCommand(
                     request.CustomerId,
-                    request.LineItems.Select(li => li.ToDomain()).ToList()),
-                cancellationToken)
+                    lineItems.Select(li => li.ToDomain()).ToList()),
+                cancellationToken))
             .ToHttpResponseAsync(
                 OrderResponse.From,
                 opts => opts
-                    .CreatedAtRoute("Orders_GetById", o => new Microsoft.AspNetCore.Routing.RouteValueDictionary
-                    {
-                        ["id"] = o.Id.Value,
-                    })
+                    .CreatedAtRoute("Orders_GetById", o => o.Id.Value)
                     .WithVersionedRoute())
             .AsActionResultAsync<OrderResponse>();
 
@@ -54,7 +48,7 @@ public class OrdersController : ControllerBase
     public ValueTask<ActionResult<OrderResponse>> GetById(
         OrderId id,
         CancellationToken cancellationToken) =>
-        _sender.Send(new GetOrderByIdQuery(id), cancellationToken)
+        sender.Send(new GetOrderByIdQuery(id), cancellationToken)
             .ToHttpResponseAsync(
                 OrderResponse.From,
                 opts => opts
@@ -65,14 +59,14 @@ public class OrdersController : ControllerBase
 
     /// <summary>List overdue orders as a bounded page. <c>GET /api/orders/overdue</c>.</summary>
     [HttpGet("overdue", Name = "Orders_GetOverdue")]
+    [InputOrigin(InputLocation.Query)]
     [ProducesResponseType(typeof(PagedResponse<OrderResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public ValueTask<ActionResult<PagedResponse<OrderResponse>>> GetOverdue(
-        [FromQuery] string? cursor,
-        [FromQuery] int? limit,
         CancellationToken cancellationToken) =>
-        _sender.Send(new ListOverdueOrdersQuery(cursor, limit), cancellationToken)
+        Request.TryCreatePageRequest()
+            .BindAsync(pagination => sender.Send(new ListOverdueOrdersQuery(pagination), cancellationToken))
             .ToHttpResponseAsync(
                 HttpContext.PageUrl("Orders_GetOverdue", (next, applied) =>
                     new Microsoft.AspNetCore.Routing.RouteValueDictionary
@@ -103,7 +97,7 @@ public class OrdersController : ControllerBase
         OrderId id,
         [FromBody] AddLineItemRequest request,
         CancellationToken cancellationToken) =>
-        _sender.Send(
+        sender.Send(
                 new AddLineItemCommand(id, request.ProductId, request.Quantity, ETagHelper.ParseIfMatch(Request)),
                 cancellationToken)
             .ToHttpResponseAsync(
@@ -118,13 +112,14 @@ public class OrdersController : ControllerBase
     [HttpDelete("{id}/line-items/{lineItemId}")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<OrderResponse>> RemoveLineItem(
         OrderId id,
         LineItemId lineItemId,
         CancellationToken cancellationToken) =>
-        _sender.Send(new RemoveLineItemCommand(id, lineItemId), cancellationToken)
+        sender.Send(new RemoveLineItemCommand(id, lineItemId), cancellationToken)
             .ToHttpResponseAsync(OrderResponse.From)
             .AsActionResultAsync<OrderResponse>();
 
@@ -132,12 +127,13 @@ public class OrdersController : ControllerBase
     [HttpPost("{id}/submission")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<OrderResponse>> Submit(
         OrderId id,
         CancellationToken cancellationToken) =>
-        _sender.Send(new SubmitOrderCommand(id), cancellationToken)
+        sender.Send(new SubmitOrderCommand(id), cancellationToken)
             .ToHttpResponseAsync(OrderResponse.From)
             .AsActionResultAsync<OrderResponse>();
 
@@ -145,12 +141,13 @@ public class OrdersController : ControllerBase
     [HttpPost("{id}/approval")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<OrderResponse>> Approve(
         OrderId id,
         CancellationToken cancellationToken) =>
-        _sender.Send(new ApproveOrderCommand(id), cancellationToken)
+        sender.Send(new ApproveOrderCommand(id), cancellationToken)
             .ToHttpResponseAsync(OrderResponse.From)
             .AsActionResultAsync<OrderResponse>();
 
@@ -158,12 +155,13 @@ public class OrdersController : ControllerBase
     [HttpPost("{id}/shipment")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<OrderResponse>> Ship(
         OrderId id,
         CancellationToken cancellationToken) =>
-        _sender.Send(new ShipOrderCommand(id), cancellationToken)
+        sender.Send(new ShipOrderCommand(id), cancellationToken)
             .ToHttpResponseAsync(OrderResponse.From)
             .AsActionResultAsync<OrderResponse>();
 
@@ -171,12 +169,13 @@ public class OrdersController : ControllerBase
     [HttpPost("{id}/delivery")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<OrderResponse>> Deliver(
         OrderId id,
         CancellationToken cancellationToken) =>
-        _sender.Send(new DeliverOrderCommand(id), cancellationToken)
+        sender.Send(new DeliverOrderCommand(id), cancellationToken)
             .ToHttpResponseAsync(OrderResponse.From)
             .AsActionResultAsync<OrderResponse>();
 
@@ -186,19 +185,19 @@ public class OrdersController : ControllerBase
     /// Requires <c>orders:cancel</c> AND ownership (or <c>orders:read-all</c>).
     /// The resource-authorization pipeline loads the <see cref="Order"/> once via
     /// <c>SharedResourceLoaderById&lt;Order, OrderId&gt;</c>; the handler re-uses
-    /// the loaded instance via the v4 typed
-    /// <c>IAuthorizedResource&lt;CancelOrderCommand, Order&gt;</c> accessor.
+    /// the loaded instance supplied to its protected actor/resource business method.
     /// </para>
     /// </summary>
     [HttpPost("{id}/cancellation")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ValueTask<ActionResult<OrderResponse>> Cancel(
         OrderId id,
         CancellationToken cancellationToken) =>
-        _sender.Send(new CancelOrderCommand(id), cancellationToken)
+        sender.Send(new CancelOrderCommand(id), cancellationToken)
             .ToHttpResponseAsync(OrderResponse.From)
             .AsActionResultAsync<OrderResponse>();
 }

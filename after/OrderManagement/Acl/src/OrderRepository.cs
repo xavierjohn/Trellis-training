@@ -1,4 +1,4 @@
-namespace OrderManagement.AntiCorruptionLayer;
+﻿namespace OrderManagement.AntiCorruptionLayer;
 
 using Microsoft.EntityFrameworkCore;
 using OrderManagement.Application.Orders;
@@ -6,29 +6,26 @@ using OrderManagement.Domain;
 using Trellis.EntityFrameworkCore;
 
 /// <summary>EF Core implementation of <see cref="IOrderRepository"/>.</summary>
-internal sealed class OrderRepository : RepositoryBase<Order, OrderId>, IOrderRepository
+internal sealed class OrderRepository(AppDbContext context) : RepositoryBase<Order, OrderId>(context), IOrderRepository
 {
-    public OrderRepository(AppDbContext context) : base(context) { }
+    private static readonly SeekDefinition<Order, Guid> Seek = SeekDefinition.Ascending<Order, Guid>(o => o.Id.Value);
 
     public Task<Result<Page<Order>>> ListByCustomerPageAsync(
-        CustomerId customerId, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken) =>
+        CustomerId customerId, PageRequest pagination, CancellationToken cancellationToken) =>
         DbSet
             .Include(o => o.LineItems)
             .Where(o => o.CustomerId == customerId)
-            .ToPageAsync(pageSize, cursor, o => o.Id.Value, cancellationToken: cancellationToken);
+            .ToPageAsync(pagination, Seek, cancellationToken: cancellationToken);
 
     public Task<Result<Page<Order>>> QueryPageAsync(
-        Specification<Order> specification, PageSize pageSize, Cursor? cursor, CancellationToken cancellationToken) =>
+        Specification<Order> specification, PageRequest pagination, CancellationToken cancellationToken) =>
         DbSet
             .Include(o => o.LineItems)
             .Where(specification)
-            .ToPageAsync(pageSize, cursor, o => o.Id.Value, cancellationToken: cancellationToken);
+            .ToPageAsync(pagination, Seek, cancellationToken: cancellationToken);
 
-    public override async Task<Maybe<Order>> FindByIdAsync(OrderId id, CancellationToken cancellationToken)
-    {
-        var order = await DbSet
+    public override Task<Maybe<Order>> FindByIdAsync(OrderId id, CancellationToken cancellationToken) =>
+        DbSet
             .Include(o => o.LineItems)
-            .FirstOrDefaultAsync(o => o.Id == id, cancellationToken);
-        return order is null ? Maybe<Order>.None : Maybe.From(order);
-    }
+            .FirstOrDefaultMaybeAsync(o => o.Id == id, cancellationToken);
 }
